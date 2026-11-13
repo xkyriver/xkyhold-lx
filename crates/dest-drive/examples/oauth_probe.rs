@@ -113,8 +113,12 @@ fn main() {
         enc(&redirect),
         enc(SCOPE),
     );
-    println!("Opening the browser for Google sign-in (redirect {redirect})…");
-    let _ = std::process::Command::new("xdg-open").arg(&url).status();
+    // The URL holds no secret (client id, PKCE challenge, state). With
+    // PROBE_NO_OPEN set it is only printed, to open in a chosen browser.
+    println!("Sign-in URL: {url}");
+    if std::env::var_os("PROBE_NO_OPEN").is_none() {
+        let _ = std::process::Command::new("xdg-open").arg(&url).status();
+    }
 
     let (mut stream, _) = listener.accept().expect("redirect");
     let mut line = String::new();
