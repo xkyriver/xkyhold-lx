@@ -1,21 +1,48 @@
 // Prevents an extra console window on Windows; harmless on Linux.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+const USAGE: &str = "Usage: xkyhold-lx [--scheduled | --help | --version]
+
+  (no option)   open the window
+  --scheduled   what the hourly timer runs: a backup or a reminder, if due
+  --help        show this help
+  --version     show the version
+
+For backups from a terminal, use xkyhold-lx-cli.";
+
 fn main() -> std::process::ExitCode {
-    // The hourly systemd timer: no window, no WebKit.
-    if std::env::args_os().nth(1).is_some_and(|a| a == "--scheduled") {
-        return match xkyhold_app::schedule::run_scheduled() {
-            Ok(()) => std::process::ExitCode::SUCCESS,
-            Err(e) => {
-                eprintln!("xkyhold-lx: {e}");
-                std::process::ExitCode::FAILURE
-            }
-        };
+    use std::process::ExitCode;
+    // Anything but the window answers here and leaves: no WebKit, and the
+    // timer's program path is not touched.
+    match std::env::args_os().nth(1) {
+        None => {}
+        // The hourly systemd timer.
+        Some(a) if a == "--scheduled" => {
+            return match xkyhold_app::schedule::run_scheduled() {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(e) => {
+                    eprintln!("xkyhold-lx: {e}");
+                    ExitCode::FAILURE
+                }
+            };
+        }
+        Some(a) if a == "--help" || a == "-h" => {
+            println!("{USAGE}");
+            return ExitCode::SUCCESS;
+        }
+        Some(a) if a == "--version" || a == "-V" => {
+            println!("xkyhold-lx {}", env!("CARGO_PKG_VERSION"));
+            return ExitCode::SUCCESS;
+        }
+        Some(a) => {
+            eprintln!("xkyhold-lx: unknown option {}\n\n{USAGE}", a.to_string_lossy());
+            return ExitCode::from(2);
+        }
     }
     #[cfg(target_os = "linux")]
     ensure_webkit_env();
     xkyhold_lx_lib::run();
-    std::process::ExitCode::SUCCESS
+    ExitCode::SUCCESS
 }
 
 /// WebKitGTK's DMABUF renderer fails with the NVIDIA proprietary driver: the
