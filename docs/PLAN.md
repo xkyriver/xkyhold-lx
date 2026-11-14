@@ -1,6 +1,6 @@
 # XkyHold-lx — plano base
 
-Data: 13/11/2026 · Estado: **Fases 0 e 1 concluídas (formato v2 aprovado a 14/11/2026); Fase 2 (motor) a começar**
+Data: 13/11/2026 · Estado: **Fases 0, 1 e 2 concluídas (motor e CLI, 14/11/2026); Fase 3 (Google Drive) a seguir**
 
 A XkyHold-lx é a app de Linux da família XkyHold. Faz cópias de segurança cifradas da pasta pessoal (`$HOME`) inteira, ou de partes dela, incluindo ficheiros ocultos, configurações, chaves, permissões e ligações simbólicas. Existe para resolver o que a XkyHold web não consegue por correr num browser. Segue o mesmo desenho e partilha o formato de repositório.
 
@@ -208,6 +208,30 @@ Achado para a Fase 1: a XkyHold web 1.0, ao reabrir um backup que o browser já 
 - 14/11/2026: revisão do proprietário (transmitida pela sessão do plano base, com o "Sim, envia" dele) aplicada ao rascunho, commit no ramo `format-v2-spec`: o restauro nunca muda o dono e só repõe o grupo quando quem restaura pertence a ele (nomes têm prioridade sobre números); questão 4 decidida (ver secção 8); a web só restaura de repositórios v2 e nenhum escritor da primeira versão põe snapshots v1 num repositório v2; pontos de montagem não atravessados guardados como pastas vazias, com contador; dito o que não se guarda (buracos de ficheiros esparsos, atributos do `chattr`, data de criação); vetores de teste com uma data anterior a 1970, dois nomes inválidos com a mesma forma visível e uma ACL POSIX. Mantidos: o esquema de AAD da secção 3.2 (verificado contra o código da web), o campo `change`, as ligações físicas como ficheiros e a divisão `mtime` + `mtimeNanos`. **A especificação continua por aprovar.**
 - 14/11/2026: a pedido do proprietário ("concordo com a tua opinião", via a sessão do plano base), campo opcional `leftOut` por raiz do snapshot v2 com as **regras** de exclusão em vigor nessa cópia (omissões, sugestões ligadas, pastas desmarcadas, padrões, pontos de montagem atravessados), não a lista de caminhos; só para mostrar. Commit `fc86104` no ramo `format-v2-spec`. **A especificação continua por aprovar.**
 - **Fase 1 concluída a 14/11/2026: especificação v2 aprovada pelo proprietário** ("Aprovo") e marcada como congelada (commit `1c4ded6` no ramo `format-v2-spec` do `xkyhold`; o `FORMAT.md` passou a apontar para o `FORMAT-v2.md`). O ramo continua só local: juntá-lo ao `main` e fazer push no repositório público `xkyhold` precisa do "sim" do proprietário. O `golden-v2-repo.json` é escrito uma vez na Fase 2 e congelado.
+
+### Fase 2 (14/11/2026)
+
+**Concluída a 14/11/2026.** Motor em Rust no `crates/core`, segundo o `FORMAT-v2.md` aprovado:
+
+- Escrita só em repositórios v2: `config` com `format: 2`, packs, índice com ponto de controlo, snapshot escrito por último e selado com `xkyhold/v2/snapshot/<id>`. Leitura de v1 e v2; os repositórios v1 abrem-se só para ler, restaurar e verificar.
+- Cópia da `$HOME` por descritores (`openat` + `O_NOFOLLOW`): nunca segue ligações; guarda modos, dono e grupo (números e nomes), datas ao nanossegundo, xattrs `user.*` e ACL POSIX, ligações simbólicas e nomes que não são UTF-8. Ficheiros especiais contados à parte. Incremental por tamanho, mtime em ns, ctime e inode. Ficheiro que muda durante a leitura: lido de novo uma vez e, se continuar a mudar, guardado como lido e contado. Pontos de montagem (lidos de `/proc/self/mountinfo`) guardados como pastas vazias, salvo os escolhidos para atravessar. Regras de exclusão (omissões, `CACHEDIR.TAG`, sugestões, caminhos, padrões) gravadas no `leftOut` do snapshot. Um repositório dentro da home exclui-se a si próprio. Recusa correr como root e caminhos fora da home.
+- Restauro seguro: tudo relativo à pasta de destino com `O_NOFOLLOW`, nome temporário + `rename`, metadados no fim (pastas depois do conteúdo), nunca muda o dono, grupo só se quem restaura pertencer a ele, nunca setuid/setgid; conflitos: saltar, substituir ou guardar ao lado.
+- Locks (com renovação numa thread), limpeza na ordem segura, retenção (mantém sempre a mais recente), verificação rápida e completa.
+- `dest-local` (escrita atómica, lixo dentro do repositório durante 30 dias) e `xkyhold-lx-cli` (`init`, `backup`, `snapshots`, `ls`, `restore`, `check`, `forget`, `status`, `presets`); o restauro pelo CLI só aceita destinos dentro da home.
+- **`golden-v2-repo.json` escrito uma vez e congelado** (commit `8e28319`); o gerador recusa reescrevê-lo.
+
+Critério da fase:
+
+| Critério | Resultado |
+|---|---|
+| Cópia e restauro de uma árvore de teste com metadados dão resultado idêntico | **Testado automaticamente** (pastas temporárias): conteúdo, modos, ligações (relativa, quebrada, para fora da home), datas ao ns incluindo antes de 1970, xattr `user.` e ACL POSIX, nome não UTF-8, pasta vazia, setuid retirado, ponto de montagem vazio, FIFO contado e não guardado. A origem fica byte a byte igual depois da cópia |
+| golden v1 | **Testado automaticamente**: os dois fixtures continuam a passar, e um repositório v1 é recusado para escrita |
+| Ida e volta cruzada com o motor TS | **Testado automaticamente** com `scripts/cross-ts.sh` (worktree descartável do `xkyhold`, checkout principal intacto): o motor TS escreve um repositório v1 e o Rust restaura-o com conteúdo e datas; o Rust escreve um v2 e o TS lê todos os bytes (índice, packs, trees, dados) e confirma que a XkyHold 1.0 recusa o `format: 2` e falha ao listar snapshots v2. O restauro de v2 **pelo** motor TS é da Fase 6 |
+| Visto | O agente correu o CLI numa home de teste na pasta temporária: `init`, duas cópias (a segunda, com `Videos` deixado de fora, enviou 526 B), `ls`, restauro (`.ssh` 0700, chave 0600, ligação e data de 1969 repostas), `check --full` e `status`. Nada na home real do proprietário |
+
+30 testes a passar (mais 3 que só correm por script ou à mão), `clippy` sem avisos. Não testado: volumes grandes e desempenho, um disco externo real, outros sistemas de ficheiros além de tmpfs (btrfs, ext4), xattrs em ligações simbólicas, e o CI no GitHub (sem remoto).
+
+Ficam para a Fase 3, por serem do Drive: envios em paralelo e retomáveis, e a cache local do índice em `$XDG_CACHE_HOME/xkyhold-lx/`. O lock local entre a janela e o temporizador é da Fase 5. Armadilha a lembrar: em btrfs, subvolumes têm `st_dev` próprio; por isso os pontos de montagem vêm do `mountinfo` e não da comparação de `st_dev`.
 
 ## 8. Questões em aberto
 
