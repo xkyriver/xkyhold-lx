@@ -74,17 +74,19 @@ fn trees_come_in_whole_packs_and_from_the_cache() {
     assert!((1..=3).contains(&whole), "{whole} whole pack reads");
     assert_eq!(dest.ranged.load(Ordering::SeqCst), 0, "no tree read one by one");
 
-    // Another session: the trees come from the local cache.
+    // Another session: the trees come from the local cache (a quick check
+    // reads every tree and no data).
     let repo = Repository::open(dest.clone(), &credential, opts()).unwrap();
     dest.whole.store(0, Ordering::SeqCst);
+    dest.ranged.store(0, Ordering::SeqCst);
+    assert!(check(&repo, false, None, &mut |_| {}).unwrap().ok());
+    assert_eq!(dest.whole.load(Ordering::SeqCst), 0, "tree packs came from the cache");
+    assert_eq!(dest.ranged.load(Ordering::SeqCst), 0);
     let snap = repo.list_snapshots().unwrap().pop().unwrap();
     let out = tempfile::tempdir().unwrap();
     let entries = repo.load_tree(&snap.roots[0].tree).unwrap();
     let report = restore(&repo, &entries, out.path(), &RestoreOptions::default(), &mut |_| {}).unwrap();
     assert_eq!(report.files, 200);
-    assert_eq!(dest.whole.load(Ordering::SeqCst), 0, "tree packs came from the cache");
-    // File contents are still read by range.
-    assert!(dest.ranged.load(Ordering::SeqCst) > 0);
     assert_eq!(std::fs::read(out.path().join("d007/f")).unwrap(), b"file 7");
 
     // A damaged cached pack is ignored and read again.
@@ -95,4 +97,45 @@ fn trees_come_in_whole_packs_and_from_the_cache() {
     dest.whole.store(0, Ordering::SeqCst);
     assert!(check(&repo, false, None, &mut |_| {}).unwrap().ok());
     assert!(dest.whole.load(Ordering::SeqCst) >= 1);
+}
+
+/// A full restore reads data packs whole after a few pieces; restoring one
+/// small file reads only its own piece.
+#[test]
+fn a_large_restore_reads_data_packs_whole() {
+    let home = tempfile::tempdir().unwrap();
+    for i in 0..300 {
+        std::fs::write(home.path().join(format!("f{i:03}")), format!("small file number {i}")).unwrap();
+    }
+    let dest = Arc::new(Counting::default());
+    let (mut repo, _) = Repository::create(dest.clone(), "pw", FAST, "t".into(), Options::default()).unwrap();
+    backup(&mut repo, home.path(), options("2026-11-14T10:00:00.000Z"), &mut |_| {}).unwrap();
+    let credential = Credential::Password(Zeroizing::new("pw".into()));
+
+    // One file: one ranged read, nothing whole.
+    let repo = Repository::open(dest.clone(), &credential, Options::default()).unwrap();
+    let snap = repo.list_snapshots().unwrap().pop().unwrap();
+    let all = repo.load_tree(&snap.roots[0].tree).unwrap();
+    let one: Vec<_> = all.iter().filter(|e| e.name == b"f042").cloned().collect();
+    let (whole_before, ranged_before) = (dest.whole.load(Ordering::SeqCst), dest.ranged.load(Ordering::SeqCst));
+    let out = tempfile::tempdir().unwrap();
+    restore(&repo, &one, out.path(), &RestoreOptions::default(), &mut |_| {}).unwrap();
+    assert_eq!(dest.ranged.load(Ordering::SeqCst) - ranged_before, 1);
+    assert_eq!(dest.whole.load(Ordering::SeqCst), whole_before);
+
+    // Everything, in a new session: a handful of requests, not 300.
+    let repo = Repository::open(dest.clone(), &credential, Options::default()).unwrap();
+    let (whole_before, ranged_before) = (dest.whole.load(Ordering::SeqCst), dest.ranged.load(Ordering::SeqCst));
+    let out = tempfile::tempdir().unwrap();
+    let report = restore(&repo, &all, out.path(), &RestoreOptions::default(), &mut |_| {}).unwrap();
+    assert_eq!(report.files, 300);
+    let requests =
+        dest.whole.load(Ordering::SeqCst) - whole_before + dest.ranged.load(Ordering::SeqCst) - ranged_before;
+    assert!(requests <= 20, "{requests} pack requests for 300 small files");
+    for i in [0, 150, 299] {
+        assert_eq!(
+            std::fs::read(out.path().join(format!("f{i:03}"))).unwrap(),
+            format!("small file number {i}").as_bytes()
+        );
+    }
 }

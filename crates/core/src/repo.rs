@@ -141,6 +141,31 @@ pub struct Repository<D: Destination + 'static> {
     data_packs: HashSet<String>,
     /// Whole tree packs read so far, by name.
     tree_packs: Mutex<HashMap<String, Arc<Vec<u8>>>>,
+    /// Data packs read whole during a large restore or check.
+    data_cache: Mutex<DataCache>,
+}
+
+/// After this many pieces of one data pack have been read by range, the
+/// rest of the pack is read whole: a full restore wants most of every pack,
+/// and on Google Drive each request costs about a second (a real 233 000
+/// file restore ran at 5 files a second). Restoring one file still reads
+/// only its own pieces.
+const WHOLE_PACK_AFTER: u32 = 3;
+/// Whole data packs kept in memory (16 MiB each), most recent last.
+const DATA_PACKS_KEPT: usize = 24;
+
+#[derive(Default)]
+struct DataCache {
+    reads: HashMap<String, u32>,
+    packs: std::collections::VecDeque<(String, Arc<Vec<u8>>)>,
+    /// One download per pack, even when several threads want it at once.
+    loading: HashMap<String, Arc<Mutex<()>>>,
+}
+
+impl DataCache {
+    fn get(&self, name: &str) -> Option<Arc<Vec<u8>>> {
+        self.packs.iter().find(|(n, _)| n == name).map(|(_, p)| p.clone())
+    }
 }
 
 impl<D: Destination + 'static> Repository<D> {
@@ -154,6 +179,7 @@ impl<D: Destination + 'static> Repository<D> {
             index_names: HashSet::new(),
             data_packs: HashSet::new(),
             tree_packs: Mutex::new(HashMap::new()),
+            data_cache: Mutex::new(DataCache::default()),
             writers: HashMap::new(),
             pending: HashSet::new(),
             unindexed: Vec::new(),
@@ -367,6 +393,7 @@ impl<D: Destination + 'static> Repository<D> {
         self.index.retain(|_, l| !names.contains(&l.pack));
         self.data_packs.retain(|p| !names.contains(p));
         self.tree_packs.lock().unwrap().retain(|p, _| !names.contains(p));
+        self.data_cache.lock().unwrap().packs.retain(|(p, _)| !names.contains(p));
     }
 
     fn seal_index(&self, file: &IndexFile) -> (String, Vec<u8>) {
@@ -568,9 +595,49 @@ impl<D: Destination + 'static> Repository<D> {
             let sealed = pack.get(start..end).ok_or(Error::Authentication("blob lies outside its pack"))?;
             return read_blob(&self.keys, &located.entry, sealed);
         }
+        if kind == BlobType::Data
+            && let Some(pack) = self.data_pack(&located.pack).map_err(missing)?
+        {
+            let (start, end) = (located.entry.offset as usize, (located.entry.offset + located.entry.length) as usize);
+            let sealed = pack.get(start..end).ok_or(Error::Authentication("blob lies outside its pack"))?;
+            return read_blob(&self.keys, &located.entry, sealed);
+        }
         let range = Some((located.entry.offset, located.entry.length));
         let sealed = self.dest.get(Dir::Packs, &located.pack, range).map_err(missing)?;
         read_blob(&self.keys, &located.entry, &sealed)
+    }
+
+    /// The whole data pack, once enough of it has been asked for; `None`
+    /// while reading pieces by range is still the better deal.
+    fn data_pack(&self, name: &str) -> Result<Option<Arc<Vec<u8>>>> {
+        let loading = {
+            let mut cache = self.data_cache.lock().unwrap();
+            if let Some(pack) = cache.get(name) {
+                return Ok(Some(pack));
+            }
+            let reads = cache.reads.entry(name.to_owned()).or_default();
+            *reads += 1;
+            if *reads <= WHOLE_PACK_AFTER {
+                return Ok(None);
+            }
+            cache.loading.entry(name.to_owned()).or_default().clone()
+        };
+        let _one_at_a_time = loading.lock().unwrap();
+        if let Some(pack) = self.data_cache.lock().unwrap().get(name) {
+            return Ok(Some(pack));
+        }
+        let bytes = self.dest.get(Dir::Packs, name, None)?;
+        if sha256_hex(&bytes) != name {
+            return Err(Error::Authentication("pack does not match its name"));
+        }
+        let pack = Arc::new(bytes);
+        let mut cache = self.data_cache.lock().unwrap();
+        cache.packs.push_back((name.to_owned(), pack.clone()));
+        while cache.packs.len() > DATA_PACKS_KEPT {
+            cache.packs.pop_front();
+        }
+        cache.loading.remove(name);
+        Ok(Some(pack))
     }
 
     // --- Trees ------------------------------------------------------------
