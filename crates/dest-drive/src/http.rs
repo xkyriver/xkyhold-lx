@@ -65,6 +65,10 @@ impl Default for Ureq {
     fn default() -> Self {
         let config = ureq::Agent::config_builder()
             .http_status_as_error(false)
+            // Drive answers 308 "Resume Incomplete" to resumable uploads:
+            // a status to read, not a redirect to follow.
+            .max_redirects(0)
+            .max_redirects_will_error(false)
             .timeout_connect(Some(Duration::from_secs(30)))
             .timeout_recv_body(Some(Duration::from_secs(300)))
             .user_agent("xkyhold-lx")
