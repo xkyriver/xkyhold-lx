@@ -83,12 +83,12 @@ fn build_home(home: &Path) -> bool {
     symlink("notes.txt", home.join("link")).unwrap();
     symlink("nowhere/at/all", home.join("dangling")).unwrap();
     symlink("/etc/passwd", home.join("outside")).unwrap();
-    rustix::fs::mknodat(rustix::fs::CWD, &home.join("fifo"), rustix::fs::FileType::Fifo, Mode::from_raw_mode(0o600), 0)
+    rustix::fs::mknodat(rustix::fs::CWD, home.join("fifo"), rustix::fs::FileType::Fifo, Mode::from_raw_mode(0o600), 0)
         .unwrap();
     std::fs::set_permissions(home.join("Empty"), std::fs::Permissions::from_mode(0o700)).unwrap();
     if xattrs {
         rustix::fs::setxattr(
-            &home.join("notes.txt"),
+            home.join("notes.txt"),
             "user.xdg.origin.url",
             b"https://example.org",
             rustix::fs::XattrFlags::empty(),

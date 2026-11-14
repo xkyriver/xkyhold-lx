@@ -37,8 +37,11 @@ pub enum Error {
     #[error("XkyHold-lx does not run as root")]
     Root,
     /// A path outside the home folder, or not a valid path inside it.
-    #[error("only items inside your home folder can be backed up: {0}")]
+    #[error("only paths inside your home folder can be used: {0}")]
     OutsideHome(String),
+    /// A mistake in how the command line was used.
+    #[error("{0}")]
+    Usage(String),
     #[error("internal error: {0}")]
     Bug(&'static str),
     #[error(transparent)]
@@ -61,6 +64,7 @@ impl Error {
             Error::Read { .. } => "read",
             Error::Root => "root",
             Error::OutsideHome(_) => "outside-home",
+            Error::Usage(_) => "usage",
             Error::Bug(_) => "other",
             Error::Io(_) => "io",
         }

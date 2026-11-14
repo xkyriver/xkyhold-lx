@@ -11,5 +11,15 @@ publish.workspace = true
 name = "xkyhold-lx-cli"
 path = "src/main.rs"
 
+[dependencies]
+clap.workspace = true
+rpassword.workspace = true
+xkyhold-core.workspace = true
+xkyhold-dest-local.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
 [lints]
 workspace = true

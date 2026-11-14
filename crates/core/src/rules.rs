@@ -39,6 +39,8 @@ pub struct Exclusions {
     pub patterns: Vec<String>,
     /// Mount points the user chose to cross.
     pub cross_mounts: Vec<Vec<u8>>,
+    /// The repository itself, when it is a folder inside the home folder.
+    pub repository: Option<Vec<u8>>,
 }
 
 const DEFAULTS: &[(&str, &[&str])] = &[
@@ -74,6 +76,15 @@ impl Matcher {
                 ..rule("default")
             });
         }
+        let mut paths = ex.paths.clone();
+        if let Some(repo) = &ex.repository {
+            paths.push(repo.clone());
+            rules.push(Rule {
+                id: Some("repository".into()),
+                patterns: Some(vec![String::from_utf8_lossy(repo).into_owned()]),
+                ..rule("default")
+            });
+        }
         rules.push(Rule { id: Some("cachedir-tag".into()), ..rule("default") });
         rules.push(Rule { id: Some("other-file-systems".into()), ..rule("default") });
         for preset in PRESETS.iter().filter(|p| ex.presets.iter().any(|id| id == p.id)) {
@@ -91,7 +102,7 @@ impl Matcher {
         for path in &ex.cross_mounts {
             rules.push(path_rule("cross-mount", path));
         }
-        Self { globs, paths: ex.paths.clone(), cross: ex.cross_mounts.clone(), rules }
+        Self { globs, paths, cross: ex.cross_mounts.clone(), rules }
     }
 
     /// The rules to record in the snapshot.
@@ -170,7 +181,9 @@ mod tests {
             paths: vec![b"Downloads".to_vec()],
             patterns: vec!["**/*.iso".into()],
             cross_mounts: vec![b"Data".to_vec()],
+            repository: Some(b"Backups/XkyHold".to_vec()),
         });
+        assert_eq!(m.check(b"Backups/XkyHold"), Verdict::LeaveOut);
         let kinds: Vec<_> = m.rules().iter().map(|r| r.kind.clone()).collect();
         for k in ["default", "preset", "path", "pattern", "cross-mount"] {
             assert!(kinds.iter().any(|x| x == k), "{k}");

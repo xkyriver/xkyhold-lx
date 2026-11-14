@@ -58,6 +58,21 @@ pub trait Destination: Send + Sync {
     fn trash(&self, dir: Dir, name: &str) -> Result<()>;
 }
 
+impl<T: Destination + ?Sized> Destination for std::sync::Arc<T> {
+    fn put(&self, dir: Dir, name: &str, data: &[u8]) -> Result<()> {
+        (**self).put(dir, name, data)
+    }
+    fn get(&self, dir: Dir, name: &str, range: Option<(u64, u64)>) -> Result<Vec<u8>> {
+        (**self).get(dir, name, range)
+    }
+    fn list(&self, dir: Dir, fresh: bool) -> Result<Vec<StoredObject>> {
+        (**self).list(dir, fresh)
+    }
+    fn trash(&self, dir: Dir, name: &str) -> Result<()> {
+        (**self).trash(dir, name)
+    }
+}
+
 fn not_found(dir: Dir, name: &str) -> Error {
     if dir == Dir::Root {
         Error::NotFound(name.to_owned())
