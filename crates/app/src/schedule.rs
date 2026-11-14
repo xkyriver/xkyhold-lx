@@ -292,7 +292,12 @@ fn quoted(text: &str) -> String {
     format!("\"{}\"", text.replace('\\', "\\\\").replace('"', "\\\"").replace('%', "%%"))
 }
 
+/// The units skip themselves when the program is gone (uninstalled, or an
+/// AppImage deleted or moved): a skipped unit is not a failed one, and a
+/// timer whose condition is false is not started at the next login.
 pub fn unit_files(program: &Path) -> (String, String) {
+    let program = program.display().to_string();
+    let condition = format!("ConditionPathExists={}\n", program.replace('%', "%%"));
     let mut env = String::new();
     // The same home and folders as the window, so the timer finds the same
     // settings, cache and log.
@@ -304,25 +309,28 @@ pub fn unit_files(program: &Path) -> (String, String) {
     let service = format!(
         "# Written by XkyHold-lx; changed or removed from its Settings.\n\
          [Unit]\n\
-         Description=XkyHold-lx automatic backup and reminder\n\n\
+         Description=XkyHold-lx automatic backup and reminder\n\
+         {condition}\n\
          [Service]\n\
          Type=oneshot\n\
          ExecStart={} --scheduled\n\
          {env}\
          Nice=10\n\
          IOSchedulingClass=idle\n",
-        quoted(&program.display().to_string())
+        quoted(&program)
     );
-    let timer = "# Written by XkyHold-lx; changed or removed from its Settings.\n\
-                 [Unit]\n\
-                 Description=XkyHold-lx: see every hour whether a backup or a reminder is due\n\n\
-                 [Timer]\n\
-                 OnCalendar=hourly\n\
-                 RandomizedDelaySec=5min\n\
-                 Persistent=true\n\n\
-                 [Install]\n\
-                 WantedBy=timers.target\n"
-        .to_owned();
+    let timer = format!(
+        "# Written by XkyHold-lx; changed or removed from its Settings.\n\
+         [Unit]\n\
+         Description=XkyHold-lx: see every hour whether a backup or a reminder is due\n\
+         {condition}\n\
+         [Timer]\n\
+         OnCalendar=hourly\n\
+         RandomizedDelaySec=5min\n\
+         Persistent=true\n\n\
+         [Install]\n\
+         WantedBy=timers.target\n"
+    );
     (service, timer)
 }
 
@@ -378,7 +386,8 @@ pub fn sync_units(s: &Settings) -> Result<()> {
     let (service, timer) = unit_files(&program()?);
     let same = std::fs::read_to_string(&service_path).is_ok_and(|t| t == service)
         && std::fs::read_to_string(&timer_path).is_ok_and(|t| t == timer);
-    if same && timer_enabled() {
+    // Inactive while enabled: its program was missing at login; now it is back.
+    if same && timer_enabled() && systemctl(&["is-active", TIMER]).is_ok_and(|o| o.status.success()) {
         return Ok(());
     }
     std::fs::create_dir_all(&dir)?;
@@ -440,6 +449,19 @@ mod tests {
         assert!(service.contains("IOSchedulingClass=idle"));
         assert!(timer.contains("Persistent=true") && timer.contains("WantedBy=timers.target"));
         assert_eq!(quoted("a%b\"c"), "\"a%%b\\\"c\"");
+    }
+
+    /// Uninstalled: the units skip themselves instead of failing every hour.
+    #[test]
+    fn units_skip_themselves_without_the_program() {
+        let (service, timer) = unit_files(Path::new("/home/u/Apps 100%/xkyhold-lx.AppImage"));
+        let condition = "\nConditionPathExists=/home/u/Apps 100%%/xkyhold-lx.AppImage\n";
+        for unit in [&service, &timer] {
+            let (head, _) = unit.split_once("\n\n[").unwrap();
+            assert!(head.starts_with("# Written") && head.contains("[Unit]"), "{unit}");
+            assert!(head.contains(condition.trim_end()), "{unit}");
+        }
+        assert!(service.contains("ExecStart=\"/home/u/Apps 100%%/xkyhold-lx.AppImage\" --scheduled"));
     }
 
     #[test]
