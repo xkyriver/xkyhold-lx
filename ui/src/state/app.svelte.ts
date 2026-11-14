@@ -2,7 +2,7 @@
 // the banners. Screens read `app` and call the functions below.
 
 import { api, on } from '../lib/api'
-import type { JobDone, Secret, Settings, Status, UiError } from '../lib/api'
+import type { Available, JobDone, Secret, Settings, Status, UiError } from '../lib/api'
 import { formatBytes } from '../lib/format'
 import { applyLanguage, fileCount, t } from '../lib/i18n.svelte'
 
@@ -39,6 +39,8 @@ export const app = $state({
   generation: 0,
   /** The result of the last check, also shown next to the Check buttons. */
   lastCheck: null as { ok: boolean; text: string; time: string } | null,
+  /** A newer version to offer (docs/UPDATES.md 4.3). */
+  update: null as Available | null,
 })
 
 export const settings = (): Settings | undefined => app.status?.settings
@@ -84,6 +86,8 @@ export function explain(err: unknown): string {
       return t('XkyHold-lx only works with what is inside your home folder.')
     case 'root':
       return t('XkyHold-lx does not run as administrator (root). Open it as yourself.')
+    case 'update-check':
+      return t('Could not look for a new version. Check your internet connection and try again.')
     case 'keyring':
       return t('The keyring is not available. Unlock it, or install GNOME Keyring or KWallet, and try again.')
     case 'no-client':
@@ -267,6 +271,33 @@ function finished(done: JobDone): void {
   void refresh()
 }
 
+/**
+ * Looks for a newer version: at most once a day when the window opens, or
+ * `now` from Settings (which reports a failure). Never during a job.
+ */
+export async function lookForUpdate(now: boolean): Promise<void> {
+  try {
+    app.update = await api.updateCheck(now)
+    if (now) await refresh()
+  } catch (err) {
+    if (now) throw err
+  }
+}
+
+/** "Not now": this version is not offered again; the next one is. */
+export async function skipUpdate(): Promise<void> {
+  if (!app.update) return
+  const version = app.update.version
+  app.update = null
+  await api.updateSkip(version).catch(fail)
+}
+
+/** "Update". For now it opens the release page (docs/UPDATES.md, phase U2). */
+export async function startUpdate(): Promise<void> {
+  if (!app.update || app.job) return
+  await api.openRelease(app.update.page).catch(fail)
+}
+
 export async function start(): Promise<void> {
   await on.progress((p) => {
     if (!app.job) return
@@ -283,6 +314,7 @@ export async function start(): Promise<void> {
   }
   app.ready = true
   await openBackup()
+  void lookForUpdate(false)
   // Automatic backups run in another process: notice them and their end.
   setInterval(() => {
     if (!app.job) void refresh().catch(() => {})

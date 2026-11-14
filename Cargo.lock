@@ -5550,8 +5550,10 @@ name = "xkyhold-app"
 version = "1.0.1"
 dependencies = [
  "serde",
+ "serde_json",
  "tempfile",
  "toml 0.9.12+spec-1.1.0",
+ "ureq",
  "xkyhold-core",
  "xkyhold-dest-drive",
  "xkyhold-dest-local",

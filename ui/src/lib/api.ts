@@ -35,6 +35,18 @@ export interface Settings {
   last_backup: LastBackup | null
   automatic: 'off' | 'hourly' | 'daily' | 'weekly'
   notify_success: boolean
+  check_updates: boolean
+  update_checked: string | null
+  update_latest: Available | null
+  update_skipped: string | null
+}
+
+/** A newer version of XkyHold-lx (docs/UPDATES.md 4.3). */
+export interface Available {
+  version: string
+  page: string
+  notes_en: string
+  notes_pt: string
 }
 
 export interface Status {
@@ -137,7 +149,7 @@ export const api = {
   checkStart: (full: boolean) => invoke<void>('check_start', { full }),
   saveSettings: (
     patch: Partial<
-      Pick<Settings, 'what' | 'remind_days' | 'keep_months' | 'language' | 'theme' | 'automatic' | 'notify_success'>
+      Pick<Settings, 'what' | 'remind_days' | 'keep_months' | 'language' | 'theme' | 'automatic' | 'notify_success' | 'check_updates'>
     >,
   ) =>
     invoke<Settings>('save_settings', { patch }),
@@ -149,6 +161,9 @@ export const api = {
   countSizes: () => invoke<void>('count_sizes'),
   openFolder: (path: string) => invoke<void>('open_folder', { path }),
   closeNow: () => invoke<void>('close_now'),
+  updateCheck: (now: boolean) => invoke<Available | null>('update_check', { now }),
+  updateSkip: (version: string) => invoke<void>('update_skip', { version }),
+  openRelease: (url: string) => invoke<void>('open_release', { url }),
 }
 
 export const on = {

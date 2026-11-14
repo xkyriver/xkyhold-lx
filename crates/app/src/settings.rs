@@ -67,6 +67,15 @@ pub struct Settings {
     /// once a day.
     pub last_reminded: Option<String>,
     pub last_problem: Option<String>,
+    /// Look for a new version when the window opens, at most once a day
+    /// (docs/UPDATES.md 4.2, decision U1: on by default).
+    pub check_updates: bool,
+    /// When the last look for a new version succeeded.
+    pub update_checked: Option<String>,
+    /// What that look found, if it was newer than this version.
+    pub update_latest: Option<crate::update::Available>,
+    /// A version set aside with "Not now": not shown again.
+    pub update_skipped: Option<String>,
 }
 
 impl Default for Settings {
@@ -85,6 +94,10 @@ impl Default for Settings {
             notify_success: false,
             last_reminded: None,
             last_problem: None,
+            check_updates: true,
+            update_checked: None,
+            update_latest: None,
+            update_skipped: None,
         }
     }
 }

@@ -253,6 +253,12 @@ impl Secret {
 /// systemd still works; only reminders and automatic backups with the
 /// window closed are missing.
 fn sync_timer() {
+    // Development: a window on a test home must not touch the timer of the
+    // person's real one (the units have the same name).
+    #[cfg(debug_assertions)]
+    if std::env::var_os("XKYHOLD_LX_NO_TIMER").is_some() {
+        return;
+    }
     match Settings::load().and_then(|s| xkyhold_app::schedule::sync_units(&s)) {
         Ok(()) => {}
         Err(e) => xkyhold_app::log(&format!("the timer could not be updated: {e}")),
@@ -661,6 +667,7 @@ struct SettingsPatch {
     theme: Option<String>,
     automatic: Option<String>,
     notify_success: Option<bool>,
+    check_updates: Option<bool>,
 }
 
 #[tauri::command]
@@ -707,6 +714,9 @@ async fn save_settings(patch: SettingsPatch) -> Res<Settings> {
         }
         if let Some(v) = patch.notify_success {
             s.notify_success = v;
+        }
+        if let Some(v) = patch.check_updates {
+            s.check_updates = v;
         }
         Ok(())
     })?;
@@ -825,6 +835,38 @@ async fn open_folder(path: String) -> Res<()> {
     Ok(())
 }
 
+/// A newer version to show, if any (docs/UPDATES.md 4.2). Without `now`
+/// it looks at most once a day, and a failure shows nothing; with `now`
+/// (Settings → "Check now") a failure is reported.
+#[tauri::command]
+async fn update_check(now: bool) -> Res<Option<xkyhold_app::update::Available>> {
+    blocking(move || match xkyhold_app::update::check(now) {
+        Ok(found) => Ok(found),
+        Err(e) if now => Err(ui("update-check", &e.to_string())),
+        Err(e) => {
+            xkyhold_app::log(&format!("update check: {e}"));
+            Ok(Settings::load().ok().as_ref().and_then(xkyhold_app::update::shown))
+        }
+    })
+    .await
+}
+
+/// "Not now" on a new version.
+#[tauri::command]
+async fn update_skip(version: String) -> Res<()> {
+    Ok(xkyhold_app::update::skip(&version)?)
+}
+
+/// Opens a release page in the browser; nothing outside the releases.
+#[tauri::command]
+async fn open_release(url: String) -> Res<()> {
+    if !url.starts_with(xkyhold_app::update::RELEASES) || url.contains(char::is_whitespace) {
+        return Err(ui("usage", "not a release page"));
+    }
+    std::process::Command::new("xdg-open").arg(&url).spawn().map_err(Error::from)?;
+    Ok(())
+}
+
 /// The window may close; when a job runs it asks first.
 #[tauri::command]
 fn close_now(app: AppHandle) {
@@ -872,6 +914,9 @@ pub fn run() {
             count_sizes,
             open_folder,
             close_now,
+            update_check,
+            update_skip,
+            open_release,
         ]);
     #[cfg(debug_assertions)]
     let builder = builder.setup(|app| {

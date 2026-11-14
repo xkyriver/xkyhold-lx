@@ -9,6 +9,7 @@
   import Restore from './ui/Restore.svelte'
   import Settings from './ui/Settings.svelte'
   import Wizard from './ui/Wizard.svelte'
+  import UpdateNotice from './ui/UpdateNotice.svelte'
 
   const tabs: { id: View; label: string }[] = [
     // i18n-keys
@@ -101,6 +102,9 @@
           {/if}
           <button class="link" onclick={() => (app.notice = null)}>{t('Dismiss')}</button>
         </div>
+      {/if}
+      {#if app.update && app.view === 'home'}
+        <UpdateNotice />
       {/if}
       {#if app.signinUrl}
         <div class="banner info" role="status">

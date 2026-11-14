@@ -250,4 +250,16 @@ export const ptPT: Record<string, string> = {
     'Este computador não tem porta-chaves, por isso vais ter de entrar no Google de novo sempre que abrires o XkyHold-lx.',
   'Automatic backups need a keyring on this computer, such as GNOME Keyring or KWallet.':
     'As cópias automáticas precisam de um porta-chaves neste computador, como o GNOME Keyring ou o KWallet.',
+  'XkyHold-lx {version} is available.': 'Está disponível o XkyHold-lx {version}.',
+  'You can update when this finishes.': 'Podes atualizar quando isto terminar.',
+  'Update': 'Atualizar',
+  'What’s new': 'O que mudou',
+  'About': 'Acerca',
+  'Tell me when a new version is available': 'Avisar quando houver uma versão nova',
+  'Once a day, XkyHold-lx reads a public file on GitHub to see the latest version. Nothing about you or your backup is sent.': 'Uma vez por dia, o XkyHold-lx lê um ficheiro público no GitHub para saber qual é a versão mais recente. Não é enviado nada sobre ti nem sobre a tua cópia.',
+  'Looking…': 'A procurar…',
+  'Check now': 'Procurar agora',
+  'Last looked: {when}': 'Última procura: {when}',
+  'You have the latest version.': 'Tens a versão mais recente.',
+  'Could not look for a new version. Check your internet connection and try again.': 'Não foi possível procurar uma versão nova. Verifica a ligação à internet e tenta outra vez.',
 }

@@ -5,6 +5,7 @@
 pub mod scan;
 pub mod schedule;
 pub mod settings;
+pub mod update;
 
 use std::io::Write as _;
 use std::os::unix::ffi::OsStrExt;

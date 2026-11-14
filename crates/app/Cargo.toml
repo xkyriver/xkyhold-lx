@@ -9,12 +9,14 @@ publish.workspace = true
 
 [dependencies]
 serde.workspace = true
+serde_json.workspace = true
 toml = "0.9"
 xkyhold-core.workspace = true
 xkyhold-dest-drive.workspace = true
 xkyhold-dest-local.workspace = true
 xkyhold-secrets.workspace = true
 zeroize.workspace = true
+ureq = { version = "3", features = ["json"] }
 
 [dev-dependencies]
 tempfile.workspace = true

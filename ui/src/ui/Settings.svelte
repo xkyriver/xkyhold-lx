@@ -3,7 +3,8 @@
   import type { Settings } from '../lib/api'
   import { formatWhen, LANGUAGES, t } from '../lib/i18n.svelte'
   import { KEEP_CHOICES, REMINDER_CHOICES } from '../lib/reminder'
-  import { app, checkBackup, explain, refresh, saveSettings, signIn, stopJob } from '../state/app.svelte'
+  import { app, checkBackup, explain, lookForUpdate, refresh, saveSettings, signIn, stopJob } from '../state/app.svelte'
+  import UpdateNotice from './UpdateNotice.svelte'
   import What from './What.svelte'
 
   const MIN_PASSWORD = 8
@@ -16,6 +17,21 @@
   let busy = $state(false)
   let message = $state<{ ok: boolean; text: string } | null>(null)
   let confirmForget = $state(false)
+  let looking = $state(false)
+  let lookResult = $state<{ ok: boolean; text: string } | null>(null)
+
+  async function lookNow() {
+    looking = true
+    lookResult = null
+    try {
+      await lookForUpdate(true)
+      if (!app.update) lookResult = { ok: true, text: t('You have the latest version.') }
+    } catch (err) {
+      lookResult = { ok: false, text: explain(err) }
+    } finally {
+      looking = false
+    }
+  }
 
   const status = $derived(app.status!)
   const s = $derived(status.settings)
@@ -228,6 +244,30 @@
       </select>
     </div>
   </div>
+</section>
+
+<section class="card stack">
+  <h2>{t('About')}</h2>
+  <p>XkyHold-lx {status.version}</p>
+  <label class="check">
+    <input type="checkbox" checked={s.check_updates} onchange={(e) => saveSettings({ check_updates: e.currentTarget.checked })} />
+    {t('Tell me when a new version is available')}
+  </label>
+  <p class="muted small">
+    {t('Once a day, XkyHold-lx reads a public file on GitHub to see the latest version. Nothing about you or your backup is sent.')}
+  </p>
+  <div class="row">
+    <button class="btn" onclick={lookNow} disabled={looking}>{looking ? t('Looking…') : t('Check now')}</button>
+    {#if s.update_checked}
+      <span class="muted small">{t('Last looked: {when}', { when: formatWhen(s.update_checked) })}</span>
+    {/if}
+  </div>
+  {#if lookResult && (!lookResult.ok || !app.update)}
+    <div class="banner {lookResult.ok ? 'ok' : 'warn'}" role="status"><span>{lookResult.text}</span></div>
+  {/if}
+  {#if app.update}
+    <UpdateNotice withNotNow={false} />
+  {/if}
 </section>
 
 <section class="card stack">
