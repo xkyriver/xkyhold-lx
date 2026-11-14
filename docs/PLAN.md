@@ -1,6 +1,6 @@
 # XkyHold-lx — plano base
 
-Data: 13/11/2026 · Estado: **Fases 0, 1 e 2 concluídas (motor e CLI, 14/11/2026); Fase 3 (Google Drive) a seguir**
+Data: 13/11/2026 · Estado: **Fases 0 a 3 concluídas (motor, CLI e Google Drive, 14/11/2026); Fase 4 (interface) a seguir**
 
 A XkyHold-lx é a app de Linux da família XkyHold. Faz cópias de segurança cifradas da pasta pessoal (`$HOME`) inteira, ou de partes dela, incluindo ficheiros ocultos, configurações, chaves, permissões e ligações simbólicas. Existe para resolver o que a XkyHold web não consegue por correr num browser. Segue o mesmo desenho e partilha o formato de repositório.
 
@@ -232,6 +232,29 @@ Critério da fase:
 30 testes a passar (mais 3 que só correm por script ou à mão), `clippy` sem avisos. Não testado: volumes grandes e desempenho, um disco externo real, outros sistemas de ficheiros além de tmpfs (btrfs, ext4), xattrs em ligações simbólicas, e o CI no GitHub (sem remoto).
 
 Ficam para a Fase 3, por serem do Drive: envios em paralelo e retomáveis, e a cache local do índice em `$XDG_CACHE_HOME/xkyhold-lx/`. O lock local entre a janela e o temporizador é da Fase 5. Armadilha a lembrar: em btrfs, subvolumes têm `st_dev` próprio; por isso os pontos de montagem vêm do `mountinfo` e não da comparação de `st_dev`.
+
+### Fase 3 (14/11/2026)
+
+**Concluída a 14/11/2026.** Google Drive no `crates/dest-drive` e segredos no `crates/secrets` (crate nova, fora da lista inicial da secção 4.1: o acesso ao Secret Service não pertence ao motor nem a um destino):
+
+- Cliente da Drive API v3 (porte do `drive.ts`): repete falhas temporárias com espera crescente, renova o token numa resposta 401, pagina as listagens, descarrega intervalos e faz envios simples ou retomáveis em blocos de 8 MiB que retomam a partir do ponto que o servidor indica. Limite opcional de velocidade (`--limit-upload`).
+- `DriveFolder`: a mesma disposição `XkyHold/<nome>` da web; "apagar" é sempre mover para o lixo; lembra-se do que escreveu e apagou na sessão (as listagens do Drive atrasam-se). As subpastas são criadas por uma thread de cada vez, e a leitura junta as subpastas com o mesmo nome.
+- Login de app instalada: browser do sistema, PKCE e redirecionamento para `127.0.0.1`. O refresh token fica no Secret Service (GNOME Keyring); os tokens de acesso ficam em memória e são renovados um minuto antes de expirarem. O ID e o segredo do cliente vêm do ambiente (na compilação ou na execução), nunca do git.
+- Chave mestra do repositório no Secret Service (`remember`), para cópias sem palavra-passe; uma chave errada é detetada pelo primeiro objeto que decifra.
+- No motor: envios em paralelo (3 packs), cache local dos índices cifrados em `$XDG_CACHE_HOME/xkyhold-lx`, restauro de 6 ficheiros e 4 blocos de cada vez, verificação completa de 6 blocos de cada vez.
+- CLI: `--drive`, `login`, `logout`, `backups`, `remember`, `forget-key`; `config.toml` em `$XDG_CONFIG_HOME/xkyhold-lx`; `XKYHOLD_LX_LOG=1` regista cada token novo.
+
+Critério da fase:
+
+| Critério | Resultado |
+|---|---|
+| Cópia e restauro reais no Drive pelo CLI | **Visto pelo agente**, depois do login do proprietário no Chrome dele (o refresh token foi para o keyring, sem passar pelo agente). Repositório `XkyHold-lx test 1`, home de teste de 24 MB na pasta temporária: primeira cópia 25 MB em 14 s, segunda 0 B; restauro com cache vazia idêntico à origem (16 itens: conteúdo, modos, datas ao ns incluindo 1969, xattr, ligações, pasta vazia); `check --full` sem problemas |
+| Uma cópia que dura mais de 1 hora | **Visto pelo agente.** Repositório `XkyHold-lx test 2`: 2 GB de dados aleatórios a 500 KB/s, 3997 s (66,6 min). Primeiro token às 01:23:25; **renovado sozinho às 02:22:32** e a cópia continuou. Verificação rápida: 160 packs, 482 blocos. Restauro dos 2 GB em 153 s com SHA-256 iguais aos originais |
+| Testado automaticamente | 46 testes, incluindo um Drive falso em memória: o motor inteiro, erros 503, token revogado a meio de uma cópia, sessão revogada, envio de 20 MB com a ligação cortada a meio, paginação, limite de velocidade, uploads em paralelo a criar uma só pasta `packs`, pastas duplicadas |
+
+Problemas encontrados nos testes reais e corrigidos: (1) a biblioteca HTTP tratava o `308 Resume Incomplete` do Drive como um redirecionamento (`cf0f51c`; o Drive falso não passava pela biblioteca real); (2) envios em paralelo podiam criar duas pastas `packs` e dividir os packs entre elas (`c2861dd`; apanhado por um teste que falhava de vez em quando). A cópia longa correu com o binário anterior a (2); a verificação e o restauro com o binário novo encontram tudo. (3) Restauro e verificação lentos (cerca de 1 MB/s): passaram a ir em paralelo.
+
+Não testado: renovação depois de suspender o computador a meio, quota da Drive API em volume (questão 5: nenhum erro 429 nestes testes, mas nada foi medido a sério), contas Workspace, Secret Service ausente ou bloqueado (o caminho existe: a app pede a palavra-passe), KWallet. Ficam no Drive do proprietário as pastas de teste `XkyHold-lx test probe`, `XkyHold-lx test 1` e `XkyHold-lx test 2` (cerca de 2 GB), para ele apagar quando quiser.
 
 ## 8. Questões em aberto
 
