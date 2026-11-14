@@ -297,7 +297,11 @@ impl<D: Destination + 'static> Walker<'_, '_, D> {
                 },
             };
             let child_rel = if rel.is_empty() { name.clone() } else { [rel, b"/", &name].concat() };
-            if self.matcher.check(&child_rel) == Verdict::LeaveOut {
+            let sibling_file = |file: &[u8]| {
+                statat(dir, cstring(file).as_c_str(), AtFlags::SYMLINK_NOFOLLOW)
+                    .is_ok_and(|st| FileType::from_raw_mode(st.st_mode) == FileType::RegularFile)
+            };
+            if self.matcher.check_beside(&child_rel, sibling_file) == Verdict::LeaveOut {
                 continue;
             }
             // A chosen item, or a folder on the way to one, must be readable.

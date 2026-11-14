@@ -10,21 +10,32 @@ pub const CACHEDIR_SIGNATURE: &[u8] = b"Signature: 8a477f597d28d172789f06886806b
 pub struct Preset {
     pub id: &'static str,
     pub patterns: &'static [&'static str],
+    /// When set, a match is left out only if a file of this name sits next
+    /// to it: a `target` folder is a Rust build folder only beside a
+    /// `Cargo.toml`. The recorded rule keeps the plain patterns (FORMAT-v2.md
+    /// 5.4 is for display; a kept folder is in the tree anyway).
+    pub beside: Option<&'static str>,
+}
+
+impl Preset {
+    const fn new(id: &'static str, patterns: &'static [&'static str]) -> Self {
+        Self { id, patterns, beside: None }
+    }
 }
 
 pub const PRESETS: &[Preset] = &[
-    Preset { id: "node-modules", patterns: &["**/node_modules"] },
-    Preset { id: "rust-target", patterns: &["**/target"] },
-    Preset { id: "python-venv", patterns: &["**/.venv", "**/venv"] },
-    Preset {
-        id: "browser-caches",
-        patterns: &[".mozilla/firefox/*/cache2", ".config/google-chrome/*/Cache", ".config/chromium/*/Cache"],
-    },
-    Preset { id: "flatpak-caches", patterns: &[".var/app/*/cache"] },
-    Preset { id: "containers", patterns: &[".local/share/containers"] },
-    Preset { id: "steam", patterns: &[".local/share/Steam", ".steam"] },
-    Preset { id: "vm-images", patterns: &["**/*.qcow2", "**/*.vdi", "**/*.vmdk", ".local/share/libvirt/images"] },
-    Preset { id: "downloads", patterns: &["Downloads"] },
+    Preset::new("node-modules", &["**/node_modules"]),
+    Preset { id: "rust-target", patterns: &["**/target"], beside: Some("Cargo.toml") },
+    Preset::new("python-venv", &["**/.venv", "**/venv"]),
+    Preset::new(
+        "browser-caches",
+        &[".mozilla/firefox/*/cache2", ".config/google-chrome/*/Cache", ".config/chromium/*/Cache"],
+    ),
+    Preset::new("flatpak-caches", &[".var/app/*/cache"]),
+    Preset::new("containers", &[".local/share/containers"]),
+    Preset::new("steam", &[".local/share/Steam", ".steam"]),
+    Preset::new("vm-images", &["**/*.qcow2", "**/*.vdi", "**/*.vmdk", ".local/share/libvirt/images"]),
+    Preset::new("downloads", &["Downloads"]),
 ];
 
 /// The exclusion settings of one backup. Paths and patterns are relative
@@ -60,6 +71,8 @@ pub enum Verdict {
 
 pub struct Matcher {
     globs: Vec<Vec<u8>>,
+    /// Globs that leave a match out only beside a file of the given name.
+    beside: Vec<(Vec<u8>, Vec<u8>)>,
     paths: Vec<Vec<u8>>,
     cross: Vec<Vec<u8>>,
     rules: Vec<Rule>,
@@ -69,6 +82,7 @@ impl Matcher {
     pub fn new(ex: &Exclusions) -> Self {
         let mut rules = Vec::new();
         let mut globs: Vec<Vec<u8>> = Vec::new();
+        let mut beside = Vec::new();
         let rule = |kind: &str| Rule { kind: kind.into(), id: None, patterns: None, path: None, path_bytes: None };
         for (id, patterns) in DEFAULTS {
             globs.extend(patterns.iter().map(|p| p.as_bytes().to_vec()));
@@ -91,7 +105,10 @@ impl Matcher {
         rules.push(Rule { id: Some("other-file-systems".into()), ..rule("default") });
         for preset in PRESETS.iter().filter(|p| ex.presets.iter().any(|id| id == p.id)) {
             let patterns: Vec<String> = preset.patterns.iter().map(|p| (*p).to_owned()).collect();
-            globs.extend(patterns.iter().map(|p| p.as_bytes().to_vec()));
+            match preset.beside {
+                None => globs.extend(patterns.iter().map(|p| p.as_bytes().to_vec())),
+                Some(file) => beside.extend(patterns.iter().map(|p| (p.as_bytes().to_vec(), file.as_bytes().to_vec()))),
+            }
             rules.push(Rule { id: Some(preset.id.into()), patterns: Some(patterns), ..rule("preset") });
         }
         for path in &ex.paths {
@@ -104,7 +121,7 @@ impl Matcher {
         for path in &ex.cross_mounts {
             rules.push(path_rule("cross-mount", path));
         }
-        Self { globs, paths, cross: ex.cross_mounts.clone(), rules }
+        Self { globs, beside, paths, cross: ex.cross_mounts.clone(), rules }
     }
 
     /// The rules to record in the snapshot.
@@ -115,6 +132,19 @@ impl Matcher {
     /// Is this path (relative to home) left out by a path or pattern rule?
     pub fn check(&self, path: &[u8]) -> Verdict {
         if self.paths.iter().any(|p| p == path) || self.globs.iter().any(|g| glob_match(g, path)) {
+            Verdict::LeaveOut
+        } else {
+            Verdict::Keep
+        }
+    }
+
+    /// [`Matcher::check`], plus the rules that need a file next to the
+    /// match: `has_sibling(name)` says whether the folder holding `path`
+    /// has a regular file called `name`.
+    pub fn check_beside(&self, path: &[u8], has_sibling: impl Fn(&[u8]) -> bool) -> Verdict {
+        if self.check(path) == Verdict::LeaveOut
+            || self.beside.iter().any(|(g, file)| glob_match(g, path) && has_sibling(file))
+        {
             Verdict::LeaveOut
         } else {
             Verdict::Keep
@@ -194,6 +224,13 @@ mod tests {
         assert_eq!(m.check(b".cache"), Verdict::LeaveOut);
         assert_eq!(m.check(b"code/x/node_modules"), Verdict::LeaveOut);
         assert_eq!(m.check(b"Documents"), Verdict::Keep);
+        // A Rust build folder is one with a Cargo.toml beside it.
+        let rust = Matcher::new(&Exclusions { presets: vec!["rust-target".into()], ..Exclusions::default() });
+        assert_eq!(rust.check_beside(b"code/app/target", |f| f == b"Cargo.toml"), Verdict::LeaveOut);
+        assert_eq!(rust.check_beside(b"Photos/target", |_| false), Verdict::Keep);
+        assert_eq!(rust.check(b"code/app/target"), Verdict::Keep);
+        let recorded = rust.rules().into_iter().find(|r| r.id.as_deref() == Some("rust-target")).unwrap();
+        assert_eq!(recorded.patterns.unwrap(), ["**/target"]);
         assert!(m.crosses(b"Data"));
     }
 }

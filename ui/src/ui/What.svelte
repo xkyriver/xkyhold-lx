@@ -14,7 +14,7 @@
   const PRESET_LABELS: Record<string, string> = {
     // i18n-keys
     'node-modules': 'Node.js packages (node_modules)',
-    'rust-target': 'Rust build folders (target)',
+    'rust-target': 'Rust build folders (target, next to Cargo.toml)',
     'python-venv': 'Python environments (.venv)',
     'browser-caches': 'Browser caches',
     'flatpak-caches': 'Flatpak app caches',

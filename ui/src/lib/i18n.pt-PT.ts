@@ -212,7 +212,7 @@ export const ptPT: Record<string, string> = {
   'Your backup is complete and intact: {n} pieces of data checked.': 'A tua cópia está completa e intacta: {n} blocos de dados verificados.',
   'Part of this backup is damaged or missing. Make a new backup now so that your files are saved again.': 'Parte desta cópia de segurança está danificada ou em falta. Faz agora uma cópia nova para os ficheiros voltarem a ficar guardados.',
   'Node.js packages (node_modules)': 'Pacotes Node.js (node_modules)',
-  'Rust build folders (target)': 'Pastas de compilação Rust (target)',
+  'Rust build folders (target, next to Cargo.toml)': 'Pastas de compilação Rust (target, ao lado de Cargo.toml)',
   'Python environments (.venv)': 'Ambientes Python (.venv)',
   'Browser caches': 'Caches dos navegadores',
   'Flatpak app caches': 'Caches das apps Flatpak',

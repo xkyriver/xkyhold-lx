@@ -243,7 +243,8 @@ fn run(cli: &Cli) -> Result<()> {
         }
         Command::Presets => {
             for p in PRESETS {
-                println!("{:16} {}", p.id, p.patterns.join("  "));
+                let beside = p.beside.map(|f| format!("  (only next to {f})")).unwrap_or_default();
+                println!("{:16} {}{beside}", p.id, p.patterns.join("  "));
             }
         }
         Command::Init => {

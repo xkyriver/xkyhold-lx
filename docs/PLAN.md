@@ -394,6 +394,10 @@ No repositório `xkyhold`, commit `935c1a3` (só local; o push e o deploy são d
 
 **Fase 7 concluída a 14/11/2026:** v1.0.0 publicada, com a página no ar.
 
+### Depois da 1.0.0 (14/11/2026)
+
+- A pedido do proprietário, a sugestão "Pastas de compilação Rust" só deixa de fora uma pasta `target` quando há um ficheiro `Cargo.toml` ao lado (antes era qualquer pasta `target`). O espaço mostrado segue a mesma regra. O `leftOut` continua a registar `**/target`: a especificação diz que é só para mostrar, e uma pasta `target` guardada está na árvore. Na home do proprietário passam a ser guardadas três pastas `target` de projetos Maven (`pom.xml`, cerca de 48 MB). Testes `a_target_folder_is_left_out_only_beside_cargo_toml` e nas regras e no espaço. Ainda não está numa release.
+
 ## 8. Questões em aberto
 
 1. ~~Repositório GitHub~~: **decidido pelo proprietário a 14/11/2026:** privado desde já (com o "sim" dele no momento de o criar), público na release v1.0.0.

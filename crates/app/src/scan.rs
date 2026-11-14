@@ -97,7 +97,10 @@ pub fn preset_sizes(home: &Path, cancel: &AtomicBool) -> Result<HashMap<&'static
                 continue;
             }
             let Ok(meta) = entry.metadata() else { continue };
-            let preset = PRESETS.iter().find(|p| p.patterns.iter().any(|g| glob_match(g.as_bytes(), &child)));
+            let preset = PRESETS.iter().find(|p| {
+                p.patterns.iter().any(|g| glob_match(g.as_bytes(), &child))
+                    && p.beside.is_none_or(|file| dir.join(file).symlink_metadata().is_ok_and(|m| m.is_file()))
+            });
             if let Some(preset) = preset {
                 *sizes.get_mut(preset.id).expect("every preset") +=
                     if meta.is_dir() { tree_size(&entry.path(), &mounts, cancel) } else { meta.len() };
@@ -145,12 +148,19 @@ mod tests {
         }
         std::fs::write(h.join("code/app/node_modules/lib/a.js"), vec![0u8; 1000]).unwrap();
         std::fs::write(h.join("Downloads/big.iso"), vec![0u8; 500]).unwrap();
+        // A Rust build folder counts; a folder that only happens to be called target does not.
+        for d in ["code/rs/target/debug", "Photos/target"] {
+            std::fs::create_dir_all(h.join(d)).unwrap();
+        }
+        std::fs::write(h.join("code/rs/Cargo.toml"), b"[package]").unwrap();
+        std::fs::write(h.join("code/rs/target/debug/app"), vec![0u8; 300]).unwrap();
+        std::fs::write(h.join("Photos/target/beach.jpg"), vec![0u8; 70]).unwrap();
         std::fs::write(h.join("notes.txt"), b"x").unwrap();
         std::os::unix::fs::symlink(h.join("Documents"), h.join("link")).unwrap();
 
         let top = folders(h, "").unwrap();
         let names: Vec<&str> = top.iter().map(|f| f.name.as_str()).collect();
-        assert_eq!(names, [".cache", "code", "Documents", "Downloads", "Dropbox"]);
+        assert_eq!(names, [".cache", "code", "Documents", "Downloads", "Dropbox", "Photos"]);
         assert!(top[0].always_out);
         assert!(top[4].cloud);
         assert!(!top[2].cloud && !top[2].always_out);
@@ -159,6 +169,7 @@ mod tests {
         let sizes = preset_sizes(h, &AtomicBool::new(false)).unwrap();
         assert_eq!(sizes["node-modules"], 1000);
         assert_eq!(sizes["downloads"], 500);
+        assert_eq!(sizes["rust-target"], 300);
         assert_eq!(sizes["steam"], 0);
     }
 }
