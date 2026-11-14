@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.1 — 2026-11-14
+
+- "Rust build folders" now leaves out a `target` folder only when a
+  `Cargo.toml` sits next to it. Any other folder called `target`, such as a
+  photo folder or a Maven build folder, is backed up. The size shown for the
+  suggestion follows the same rule.
+
 ## 1.0.0 — 2026-11-14
 
 First release of XkyHold-lx, the Linux app of [XkyHold](https://xkyhold.xkyriver.com):
