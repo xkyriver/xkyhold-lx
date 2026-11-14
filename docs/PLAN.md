@@ -355,6 +355,19 @@ Feita pelo proprietário na janela release, com a outra conta Google (Google Wor
 
 Encontrado e corrigido durante a prova: (1) `bd69e48`: o login Google abriu no navegador errado e o assistente ficou preso sem "Voltar"; agora há "Cancelar" enquanto espera pela Google; (2) `7c976c9`: as árvores passam a ser lidas em packs inteiros e guardadas em cache local (`XDG_CACHE_HOME/xkyhold-lx/<repo_id>/trees`, verificadas pelo SHA-256 do nome); os tamanhos na janela passam a unidades decimais (a janela dizia 24 GB e o CLI 26,2 GB); (3) `b7e663d`: num restauro grande, um pack de dados passa a ser lido inteiro à terceira leitura parcial (até 24 em memória); restaurar um ficheiro pequeno continua a ler só o seu pedaço. Falta da Fase 7: um restauro num utilizador ou máquina limpos, os pacotes, a página e a release.
 
+### Fase 7: restauro num utilizador limpo (14/11/2026)
+
+Utilizador Linux novo `xkytest`, criado pelo proprietário, sem configuração, cache, sessão Google nem porta-chaves desbloqueado; a janela release (cópia em `/var/tmp`) foi aberta com `machinectl shell xkytest@` no ecrã do proprietário (Xwayland, `xhost +SI:localuser:xkytest`). O login Google foi feito no navegador do proprietário com o endereço que a janela mostra (o redirecionamento para `127.0.0.1` funciona entre utilizadores). Só com a conta Google e a palavra-passe, a janela abriu `pulsar-omarchy-xriver`.
+
+| Passo | Resultado |
+|---|---|
+| Primeiro arranque | **Falhou:** sem porta-chaves, o login Google era recusado ("The keyring is not available…"). Corrigido em `a1cfd31` (ver abaixo) |
+| Login e abertura da cópia | Com a versão corrigida, funcionou; a página inicial mostra a cópia das 18:16 |
+| Restauro de Documents e Pictures | Para `~xkytest/XkyHold-restore/2026-11-14 18.16`, das 21:31 às 21:34 |
+| Comparação (script só de leitura, corrido pelo proprietário com `sudo`) | **0 problemas** nos dois sentidos: 4392 ficheiros, 647 pastas, 9 ligações, 1,4 GB; 7 imagens novas desde a cópia. Todos os itens restaurados pertencem a `xkytest` (o restauro nunca muda o dono) |
+
+Encontrado e corrigido (`a1cfd31`): o porta-chaves contava como disponível só por haver bus de sessão; agora só conta se uma procura responder. Sem porta-chaves, a sessão Google fica em memória enquanto a janela está aberta, e o assistente diz que será preciso entrar de novo e que a cópia automática precisa de um porta-chaves. Encontrado e por corrigir: a página inicial de um utilizador novo diz "Your files are safe" com a cópia de outro utilizador do mesmo computador (a cópia "deste computador" é escolhida pelo nome da máquina, não pela home); e "Back up now" faria a cópia da home desse utilizador para o mesmo repositório. Proposta: escolher a cópia mais recente da mesma máquina **e** da mesma home, e, se não houver, a página inicial diz que ainda não há cópia desta pasta pessoal. Falta da Fase 7: os pacotes, a página e a release.
+
 ## 8. Questões em aberto
 
 1. ~~Repositório GitHub~~: **decidido pelo proprietário a 14/11/2026:** privado desde já (com o "sim" dele no momento de o criar), público na release v1.0.0.
