@@ -11,6 +11,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use clap::{Parser, Subcommand, ValueEnum};
+use serde::{Deserialize, Serialize};
 use xkyhold_core::backup::{BackupOptions, backup};
 use xkyhold_core::check::check;
 use xkyhold_core::crypto::{Credential, DEFAULT_ARGON2};
@@ -24,15 +25,20 @@ use xkyhold_core::snapshot::Snapshot;
 use xkyhold_core::time::{now_iso, now_ms};
 use xkyhold_core::tree::{Entry, EntryKind};
 use xkyhold_core::{Error, Result};
+use xkyhold_dest_drive::{Client, Drive, DriveFolder, Http, RefreshingTokens, Ureq, sign_in};
 use xkyhold_dest_local::LocalFolder;
+use xkyhold_secrets::{SecretService, SecretStore, google_refresh, repo_key};
 use zeroize::Zeroizing;
 
 #[derive(Parser)]
 #[command(name = "xkyhold-lx-cli", version, about = "Encrypted backup of your home folder")]
 struct Cli {
     /// The backup: a folder on this computer (an external disk, a NAS).
-    #[arg(long, global = true, env = "XKYHOLD_LX_REPO")]
+    #[arg(long, global = true, env = "XKYHOLD_LX_REPO", conflicts_with = "drive")]
     repo: Option<PathBuf>,
+    /// The backup: the folder XkyHold/<NAME> in your Google Drive (see `login`).
+    #[arg(long, global = true, env = "XKYHOLD_LX_DRIVE")]
+    drive: Option<String>,
     /// Open with the recovery key instead of the password.
     #[arg(long, global = true)]
     recovery_key: bool,
@@ -97,6 +103,20 @@ enum Command {
     Status,
     /// List the suggested exclusions.
     Presets,
+    /// Connect to your Google Drive (opens the browser).
+    Login {
+        /// Print the sign-in address instead of opening the browser.
+        #[arg(long)]
+        no_browser: bool,
+    },
+    /// Disconnect from Google Drive on this computer.
+    Logout,
+    /// List the backups in your Google Drive.
+    Backups,
+    /// Keep this backup's key in the keyring, so backups need no password.
+    Remember,
+    /// Remove this backup's key from the keyring.
+    ForgetKey,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -120,12 +140,92 @@ fn device() -> String {
     std::fs::read_to_string("/proc/sys/kernel/hostname").map(|h| h.trim().to_owned()).unwrap_or_else(|_| "linux".into())
 }
 
+#[derive(Default, Serialize, Deserialize)]
+struct Settings {
+    /// The Google account connected on this computer.
+    account: Option<String>,
+}
+
+fn xdg(var: &str, fallback: &str) -> Result<PathBuf> {
+    match std::env::var_os(var) {
+        Some(dir) if Path::new(&dir).is_absolute() => Ok(PathBuf::from(dir).join("xkyhold-lx")),
+        _ => Ok(home()?.join(fallback).join("xkyhold-lx")),
+    }
+}
+
+fn settings_path() -> Result<PathBuf> {
+    Ok(xdg("XDG_CONFIG_HOME", ".config")?.join("config.toml"))
+}
+
+fn load_settings() -> Result<Settings> {
+    match std::fs::read_to_string(settings_path()?) {
+        Ok(text) => toml::from_str(&text).map_err(|e| Error::Format(format!("config.toml: {e}"))),
+        Err(_) => Ok(Settings::default()),
+    }
+}
+
+fn save_settings(settings: &Settings) -> Result<()> {
+    let path = settings_path()?;
+    std::fs::create_dir_all(path.parent().expect("has a parent"))?;
+    std::fs::write(path, toml::to_string(settings).expect("serializable"))?;
+    Ok(())
+}
+
+fn secrets() -> Result<SecretService> {
+    SecretService::connect().map_err(|e| Error::Usage(e.to_string()))
+}
+
+fn client() -> Result<Client> {
+    Client::from_env().ok_or_else(|| {
+        Error::Usage("this build has no Google client; set XKYHOLD_LX_CLIENT_ID and XKYHOLD_LX_CLIENT_SECRET".into())
+    })
+}
+
+fn drive_client() -> Result<Drive> {
+    let account =
+        load_settings()?.account.ok_or_else(|| Error::Session("not connected to Google Drive; run `login`".into()))?;
+    let refresh = secrets()?
+        .get(&google_refresh(&account))
+        .map_err(|e| Error::Usage(e.to_string()))?
+        .ok_or_else(|| Error::Session("not connected to Google Drive; run `login`".into()))?;
+    let refresh = String::from_utf8(refresh).map_err(|_| Error::Session("run `login` again".into()))?;
+    let http: Arc<dyn Http> = Arc::new(Ureq::default());
+    Ok(Drive::new(http.clone(), Arc::new(RefreshingTokens::new(http, client()?, refresh))))
+}
+
 fn destination(cli: &Cli) -> Result<(Arc<dyn Destination>, Option<PathBuf>)> {
+    if let Some(name) = &cli.drive {
+        let folder = DriveFolder::open(drive_client()?, name)?;
+        folder.warm()?;
+        return Ok((Arc::new(folder), None));
+    }
     let Some(path) = &cli.repo else {
-        return Err(Error::Usage("say where the backup is with --repo or XKYHOLD_LX_REPO".into()));
+        return Err(Error::Usage("say where the backup is with --repo or --drive".into()));
     };
     let path = std::path::absolute(path)?;
     Ok((Arc::new(LocalFolder::new(&path)), Some(path)))
+}
+
+fn options() -> Options {
+    Options { cache: xdg("XDG_CACHE_HOME", ".cache").ok(), ..Options::default() }
+}
+
+/// Opens with the password (or recovery key) when given, else with the
+/// key kept in the keyring, else asks for the password.
+fn open_dest(cli: &Cli, dest: Arc<dyn Destination>) -> Result<Repo> {
+    let explicit = cli.recovery_key || std::env::var_os("XKYHOLD_LX_PASSWORD").is_some();
+    if !explicit {
+        let config = Repository::read_config(&dest)?;
+        if let Ok(store) = SecretService::connect()
+            && let Ok(Some(master)) = store.get(&repo_key(&config.repo_id))
+        {
+            match Repository::open(dest.clone(), &Credential::MasterKey(Zeroizing::new(master)), options()) {
+                Err(Error::WrongKey) => {}
+                other => return other,
+            }
+        }
+    }
+    Repository::open(dest, &credential(cli)?, options())
 }
 
 fn ask(prompt: &str, env: &str) -> Result<Zeroizing<String>> {
@@ -145,7 +245,18 @@ fn credential(cli: &Cli) -> Result<Credential> {
 
 fn open(cli: &Cli) -> Result<Repo> {
     let (dest, _) = destination(cli)?;
-    Repository::open(dest, &credential(cli)?, Options::default())
+    open_dest(cli, dest)
+}
+
+/// A line on stderr every few seconds while a long backup runs.
+fn ticker() -> impl FnMut(&xkyhold_core::backup::Progress) {
+    let mut last = std::time::Instant::now();
+    move |p| {
+        if last.elapsed().as_secs() >= 5 {
+            last = std::time::Instant::now();
+            eprintln!("  {} files, {} read… {}", p.files, human(p.bytes), p.current);
+        }
+    }
 }
 
 /// A path inside the home folder, relative to it. Refuses anything outside.
@@ -233,6 +344,52 @@ fn human(bytes: u64) -> String {
 
 fn run(cli: &Cli) -> Result<()> {
     match &cli.command {
+        Command::Login { no_browser } => {
+            let client = client()?;
+            let http = Ureq::default();
+            let signed = sign_in(&http, &client, &mut |url| {
+                if *no_browser || std::process::Command::new("xdg-open").arg(url).status().is_err() {
+                    println!("Open this address in your browser to connect XkyHold-lx:\n\n{url}\n");
+                } else {
+                    println!("Your browser opened Google's sign-in page. Waiting for you to finish there…");
+                }
+            })?;
+            let http: Arc<dyn Http> = Arc::new(http);
+            let tokens = Arc::new(RefreshingTokens::new(http.clone(), client, signed.refresh.clone()));
+            let account = Drive::new(http, tokens).about_email()?;
+            secrets()?
+                .set(&google_refresh(&account), signed.refresh.as_bytes())
+                .map_err(|e| Error::Usage(e.to_string()))?;
+            save_settings(&Settings { account: Some(account.clone()) })?;
+            println!("Connected to the Google Drive of {account}.");
+        }
+        Command::Logout => {
+            let mut settings = load_settings()?;
+            if let Some(account) = settings.account.take() {
+                secrets()?.delete(&google_refresh(&account)).map_err(|e| Error::Usage(e.to_string()))?;
+                save_settings(&settings)?;
+                println!("Disconnected from the Google Drive of {account} on this computer.");
+            }
+        }
+        Command::Backups => {
+            for name in DriveFolder::list_repositories(&drive_client()?)? {
+                println!("{name}");
+            }
+        }
+        Command::Remember => {
+            let (dest, _) = destination(cli)?;
+            let repo = Repository::open(dest, &credential(cli)?, options())?;
+            secrets()?
+                .set(&repo_key(&repo.config.repo_id), repo.keys.master_key())
+                .map_err(|e| Error::Usage(e.to_string()))?;
+            println!("This computer now opens this backup without the password.");
+        }
+        Command::ForgetKey => {
+            let (dest, _) = destination(cli)?;
+            let config = Repository::read_config(&dest)?;
+            secrets()?.delete(&repo_key(&config.repo_id)).map_err(|e| Error::Usage(e.to_string()))?;
+            println!("This computer will ask for the password again.");
+        }
         Command::Presets => {
             for p in PRESETS {
                 println!("{:16} {}", p.id, p.patterns.join("  "));
@@ -244,7 +401,7 @@ fn run(cli: &Cli) -> Result<()> {
             if std::env::var("XKYHOLD_LX_PASSWORD").is_err() && *ask("Repeat it: ", "-")? != *password {
                 return Err(Error::Usage("the passwords are different".into()));
             }
-            let (_, recovery) = Repository::create(dest, &password, DEFAULT_ARGON2, now_iso(), Options::default())?;
+            let (_, recovery) = Repository::create(dest, &password, DEFAULT_ARGON2, now_iso(), options())?;
             println!(
                 "Backup created.\n\nRecovery key (keep it away from this computer; it is shown only once):\n\n  {}\n",
                 *recovery
@@ -253,7 +410,7 @@ fn run(cli: &Cli) -> Result<()> {
         Command::Backup { only, leave_out, presets, patterns, cross_mounts } => {
             let home = home()?;
             let (dest, repo_path) = destination(cli)?;
-            let mut repo = Repository::open(dest.clone(), &credential(cli)?, Options::default())?;
+            let mut repo = open_dest(cli, dest.clone())?;
             let rel = |paths: &[PathBuf]| paths.iter().map(|p| inside_home(&home, p)).collect::<Result<Vec<_>>>();
             for id in presets {
                 if !PRESETS.iter().any(|p| p.id == id) {
@@ -275,13 +432,15 @@ fn run(cli: &Cli) -> Result<()> {
             options.parent = parent.as_ref();
             options.exclusions = exclusions;
             options.selection = if only.is_empty() { None } else { Some(rel(only)?) };
-            let snap = backup(&mut repo, &home, options, &mut |_| {});
+            let started = std::time::Instant::now();
+            let snap = backup(&mut repo, &home, options, &mut ticker());
             lock.release();
             let snap = snap?;
             let s = &snap.stats;
             println!(
-                "Backup {} done: {} files ({}), {} sent.",
+                "Backup {} done in {} s: {} files ({}), {} sent.",
                 &snap.id[..8],
+                started.elapsed().as_secs(),
                 s.files,
                 human(s.bytes),
                 human(repo.uploaded_bytes)
@@ -391,7 +550,7 @@ fn run(cli: &Cli) -> Result<()> {
         }
         Command::Forget { keep_months } => {
             let (dest, path) = destination(cli)?;
-            let mut repo = Repository::open(dest.clone(), &credential(cli)?, Options::default())?;
+            let mut repo = open_dest(cli, dest.clone())?;
             let since = now_ms() - i64::from(*keep_months) * 2_629_746_000; // average month
             let mut lock = Lock::acquire(dest, LockKind::Prune, &device())?;
             let removed = forget_older(&repo, since);

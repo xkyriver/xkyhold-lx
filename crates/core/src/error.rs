@@ -39,6 +39,15 @@ pub enum Error {
     /// A path outside the home folder, or not a valid path inside it.
     #[error("only paths inside your home folder can be used: {0}")]
     OutsideHome(String),
+    /// The Google session is missing, expired or revoked: sign in again.
+    #[error("the Google session expired or was revoked: {0}")]
+    Session(String),
+    /// The storage refused the request (quota, permissions, a full Drive).
+    #[error("Google Drive refused the request: {0}")]
+    Refused(String),
+    /// The network or the service is unavailable; trying later may work.
+    #[error("Google Drive could not be reached: {0}")]
+    Network(String),
     /// A mistake in how the command line was used.
     #[error("{0}")]
     Usage(String),
@@ -64,6 +73,9 @@ impl Error {
             Error::Read { .. } => "read",
             Error::Root => "root",
             Error::OutsideHome(_) => "outside-home",
+            Error::Session(_) => "session",
+            Error::Refused(_) => "refused",
+            Error::Network(_) => "network",
             Error::Usage(_) => "usage",
             Error::Bug(_) => "other",
             Error::Io(_) => "io",
