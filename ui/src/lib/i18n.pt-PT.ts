@@ -213,6 +213,7 @@ export const ptPT: Record<string, string> = {
   'Part of this backup is damaged or missing. Make a new backup now so that your files are saved again.': 'Parte desta cópia de segurança está danificada ou em falta. Faz agora uma cópia nova para os ficheiros voltarem a ficar guardados.',
   'Node.js packages (node_modules)': 'Pacotes Node.js (node_modules)',
   'Rust build folders (target, next to Cargo.toml)': 'Pastas de compilação Rust (target, ao lado de Cargo.toml)',
+  'Maven build folders (target, next to pom.xml)': 'Pastas de compilação Maven (target, ao lado de pom.xml)',
   'Python environments (.venv)': 'Ambientes Python (.venv)',
   'Browser caches': 'Caches dos navegadores',
   'Flatpak app caches': 'Caches das apps Flatpak',

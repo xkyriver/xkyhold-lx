@@ -149,18 +149,20 @@ mod tests {
         std::fs::write(h.join("code/app/node_modules/lib/a.js"), vec![0u8; 1000]).unwrap();
         std::fs::write(h.join("Downloads/big.iso"), vec![0u8; 500]).unwrap();
         // A Rust build folder counts; a folder that only happens to be called target does not.
-        for d in ["code/rs/target/debug", "Photos/target"] {
+        for d in ["code/rs/target/debug", "Photos/target", "work/svc/target/classes"] {
             std::fs::create_dir_all(h.join(d)).unwrap();
         }
         std::fs::write(h.join("code/rs/Cargo.toml"), b"[package]").unwrap();
         std::fs::write(h.join("code/rs/target/debug/app"), vec![0u8; 300]).unwrap();
         std::fs::write(h.join("Photos/target/beach.jpg"), vec![0u8; 70]).unwrap();
+        std::fs::write(h.join("work/svc/pom.xml"), b"<project/>").unwrap();
+        std::fs::write(h.join("work/svc/target/classes/A.class"), vec![0u8; 40]).unwrap();
         std::fs::write(h.join("notes.txt"), b"x").unwrap();
         std::os::unix::fs::symlink(h.join("Documents"), h.join("link")).unwrap();
 
         let top = folders(h, "").unwrap();
         let names: Vec<&str> = top.iter().map(|f| f.name.as_str()).collect();
-        assert_eq!(names, [".cache", "code", "Documents", "Downloads", "Dropbox", "Photos"]);
+        assert_eq!(names, [".cache", "code", "Documents", "Downloads", "Dropbox", "Photos", "work"]);
         assert!(top[0].always_out);
         assert!(top[4].cloud);
         assert!(!top[2].cloud && !top[2].always_out);
@@ -170,6 +172,7 @@ mod tests {
         assert_eq!(sizes["node-modules"], 1000);
         assert_eq!(sizes["downloads"], 500);
         assert_eq!(sizes["rust-target"], 300);
+        assert_eq!(sizes["maven-target"], 40);
         assert_eq!(sizes["steam"], 0);
     }
 }

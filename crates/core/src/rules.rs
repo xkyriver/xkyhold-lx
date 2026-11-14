@@ -26,6 +26,7 @@ impl Preset {
 pub const PRESETS: &[Preset] = &[
     Preset::new("node-modules", &["**/node_modules"]),
     Preset { id: "rust-target", patterns: &["**/target"], beside: Some("Cargo.toml") },
+    Preset { id: "maven-target", patterns: &["**/target"], beside: Some("pom.xml") },
     Preset::new("python-venv", &["**/.venv", "**/venv"]),
     Preset::new(
         "browser-caches",
@@ -231,6 +232,10 @@ mod tests {
         assert_eq!(rust.check(b"code/app/target"), Verdict::Keep);
         let recorded = rust.rules().into_iter().find(|r| r.id.as_deref() == Some("rust-target")).unwrap();
         assert_eq!(recorded.patterns.unwrap(), ["**/target"]);
+        // Maven builds into target too, next to a pom.xml.
+        let maven = Matcher::new(&Exclusions { presets: vec!["maven-target".into()], ..Exclusions::default() });
+        assert_eq!(maven.check_beside(b"work/svc/target", |f| f == b"pom.xml"), Verdict::LeaveOut);
+        assert_eq!(maven.check_beside(b"code/app/target", |f| f == b"Cargo.toml"), Verdict::Keep);
         assert!(m.crosses(b"Data"));
     }
 }

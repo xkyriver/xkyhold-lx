@@ -15,6 +15,7 @@
     // i18n-keys
     'node-modules': 'Node.js packages (node_modules)',
     'rust-target': 'Rust build folders (target, next to Cargo.toml)',
+    'maven-target': 'Maven build folders (target, next to pom.xml)',
     'python-venv': 'Python environments (.venv)',
     'browser-caches': 'Browser caches',
     'flatpak-caches': 'Flatpak app caches',

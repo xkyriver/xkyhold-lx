@@ -13,12 +13,13 @@ use xkyhold_core::tree::EntryKind;
 const FAST: Argon2Params = Argon2Params { memory_kib: 1024, iterations: 1, parallelism: 1 };
 
 /// "Rust build folders" leaves out a `target` folder only beside a
-/// `Cargo.toml`; any other folder called `target` is kept.
+/// `Cargo.toml`, "Maven build folders" only beside a `pom.xml`; any other
+/// folder called `target` is kept.
 #[test]
 fn a_target_folder_is_left_out_only_beside_cargo_toml() {
     let home = tempfile::tempdir().unwrap();
     let h = home.path();
-    for d in ["code/app/target/debug", "Photos/target", "code/odd/target"] {
+    for d in ["code/app/target/debug", "Photos/target", "code/odd/target", "code/svc/target"] {
         std::fs::create_dir_all(h.join(d)).unwrap();
     }
     std::fs::write(h.join("code/app/Cargo.toml"), b"[package]").unwrap();
@@ -27,12 +28,14 @@ fn a_target_folder_is_left_out_only_beside_cargo_toml() {
     // A folder called Cargo.toml is not a Cargo.toml.
     std::fs::create_dir(h.join("code/odd/Cargo.toml")).unwrap();
     std::fs::write(h.join("code/odd/target/x"), b"x").unwrap();
+    std::fs::write(h.join("code/svc/pom.xml"), b"<project/>").unwrap();
+    std::fs::write(h.join("code/svc/target/A.class"), b"class").unwrap();
 
     let (mut repo, _) =
         Repository::create(Arc::new(MemoryDestination::default()), "pw", FAST, "t".into(), Options::default()).unwrap();
     let mut o = BackupOptions::new("pc".into(), "2026-11-14T10:00:00.000Z".into());
     o.mount_points = Some(HashSet::new());
-    o.exclusions = Exclusions { presets: vec!["rust-target".into()], ..Exclusions::default() };
+    o.exclusions = Exclusions { presets: vec!["rust-target".into(), "maven-target".into()], ..Exclusions::default() };
     let snap = backup(&mut repo, h, o, &mut |_| {}).unwrap();
 
     let names = |tree: &str| -> Vec<(String, String)> {
@@ -57,4 +60,6 @@ fn a_target_folder_is_left_out_only_beside_cargo_toml() {
     assert_eq!(photos, ["target"], "a folder that is only called target is kept");
     let odd: Vec<String> = names(&find(&code, "odd").unwrap()).into_iter().map(|(n, _)| n).collect();
     assert_eq!(odd, ["Cargo.toml", "target"]);
+    let svc: Vec<String> = names(&find(&code, "svc").unwrap()).into_iter().map(|(n, _)| n).collect();
+    assert_eq!(svc, ["pom.xml"], "a Maven build folder is left out too");
 }
