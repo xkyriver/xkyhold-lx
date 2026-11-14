@@ -27,6 +27,7 @@ uzers.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+hex.workspace = true
 rustix = { workspace = true, features = ["fs", "process", "std"] }
 
 [lints]
