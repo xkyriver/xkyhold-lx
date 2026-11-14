@@ -205,12 +205,13 @@ Achado para a Fase 1: a XkyHold web 1.0, ao reabrir um backup que o browser já 
 
 - Rascunho da especificação v2 em `docs/FORMAT-v2.md` do repositório `xkyhold`, no ramo local `format-v2-spec` (sem push, sem deploy). **À espera da revisão do proprietário**; nenhum código depende dela ainda.
 - Propostas no rascunho para as questões em aberto 3 e 4: ligações físicas guardadas como ficheiros separados (o conteúdo já é deduplicado; a relação pode vir depois sem versão nova); um repositório v1 só passa a v2 com o acordo do utilizador e só depois de a XkyHold web com leitura v2 estar publicada (alternativa: a lx só escreve em repositórios criados por ela).
+- 14/11/2026: revisão do proprietário (transmitida pela sessão do plano base, com o "Sim, envia" dele) aplicada ao rascunho, commit no ramo `format-v2-spec`: o restauro nunca muda o dono e só repõe o grupo quando quem restaura pertence a ele (nomes têm prioridade sobre números); questão 4 decidida (ver secção 8); a web só restaura de repositórios v2 e nenhum escritor da primeira versão põe snapshots v1 num repositório v2; pontos de montagem não atravessados guardados como pastas vazias, com contador; dito o que não se guarda (buracos de ficheiros esparsos, atributos do `chattr`, data de criação); vetores de teste com uma data anterior a 1970, dois nomes inválidos com a mesma forma visível e uma ACL POSIX. Mantidos: o esquema de AAD da secção 3.2 (verificado contra o código da web), o campo `change`, as ligações físicas como ficheiros e a divisão `mtime` + `mtimeNanos`. **A especificação continua por aprovar.**
 
 ## 8. Questões em aberto
 
 1. Repositório GitHub `xkyriver/xkyhold-lx`: público desde o início ou só na release?
 2. Subdomínio ou página própria (ex.: `xkyhold.xkyriver.com/linux`), e entrada no xkyriver.com.
-3. Ligações físicas: guardar a relação ou só o conteúdo (decidir na Fase 1).
-4. Um repositório v1 existente passa a v2 na primeira cópia da lx, ou a lx só escreve em repositórios criados como v2 (decidir na Fase 1).
+3. ~~Ligações físicas~~: mantida na revisão de 14/11/2026 a proposta do rascunho, guardá-las como ficheiros separados (fecha com a aprovação da especificação).
+4. ~~Repositório v1 → v2~~: **decidido pelo proprietário a 14/11/2026:** a lx só escreve em repositórios criados como v2 e abre os v1 só para navegar, restaurar e verificar. A especificação v2 não tem atualização no lugar (pode vir depois, se houver procura). Na primeira versão com leitura v2, a XkyHold web só restaura de repositórios v2: não copia para eles nem os limpa.
 5. Quota da Drive API: é partilhada com a XkyHold web por ser o mesmo projeto; medir na Fase 3.
 6. O landing da XkyHold sugere hoje o Déjà Dup para configurações e chaves; passa a sugerir a XkyHold-lx depois da release.
