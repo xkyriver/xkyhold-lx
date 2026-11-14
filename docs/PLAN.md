@@ -327,6 +327,20 @@ Não testado: restaurar para uma pasta a partir do browser (precisa do seletor d
 - **Site:** página no site da XkyHold.
 - **XkyHold web:** os ramos `format-v2-spec` e `web-reads-v2` foram juntados ao `main` local da XkyHold a 14/11/2026 (avanço rápido até `f0e55bc`; 169 testes a passar); o push e o deploy ficam para o proprietário, antes da release da lx.
 
+### Fase 7: prova real no disco externo (14/11/2026)
+
+Feita pelo proprietário na janela release (cliente Google embutido, sem a sonda de desenvolvimento), sobre a home real, para `XKYOS/XkyHold-lx-proof/backup` (ext4 cifrado no disco externo). Deixou de fora Dropbox, ISOs, Videos e as sugestões `node_modules` e `target`.
+
+| Passo | Resultado |
+|---|---|
+| Cópia | 227 654 ficheiros, 25,6 GB, das 17:20:34 às 17:30:01 (cerca de 9,5 min, ~45 MB/s); 20 GB no disco (1510 packs); nenhum ficheiro saltado |
+| Verificação completa | Sem problemas (o resultado ficou fora da vista; corrigido, ver abaixo) |
+| Restauro completo | Para `XKYOS/XkyHold-lx-proof/2026-11-14 17.20` com a opção nova "Outra pasta…" (aprovada pelo proprietário), 17:39 a 17:44 |
+| Comparação restauro → home (script do agente, só leitura) | **0 diferenças** nos itens que não mudaram depois da cópia: 227 632 ficheiros com SHA-256, tamanho, permissões e `mtime` ao ns iguais; 28 037 pastas; 1262 ligações com o mesmo alvo; `user.*` e ACL iguais. 163 ficheiros alterados depois das 17:20 (estado de programas em uso) e 22 apagados desde então |
+| Comparação home → restauro | Nada falta sem razão: 49 itens novos desde a cópia, 126 ficheiros especiais (nunca guardados), 3 pastas com `CACHEDIR.TAG`, e o que foi deixado de fora |
+
+Encontrado e corrigido (`87743d1`): (1) logo a seguir ao assistente o temporizador mostrava um lembrete de "ainda não fizeste cópia" (o arranque `--now` de um temporizador com `Persistent=true` e registo antigo); agora a primeira passagem sem cópia só começa a contar; (2) o resultado da verificação aparecia só na faixa do topo, fora da vista; agora aparece também no cartão. Falta da Fase 7: a prova no Drive com a outra conta Google do proprietário, um restauro num utilizador ou máquina limpos, os pacotes, a página e a release.
+
 ## 8. Questões em aberto
 
 1. ~~Repositório GitHub~~: **decidido pelo proprietário a 14/11/2026:** privado desde já (com o "sim" dele no momento de o criar), público na release v1.0.0.
