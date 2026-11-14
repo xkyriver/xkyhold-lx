@@ -150,7 +150,7 @@ Mesmos tokens de cor, tipografia, cartão central e componentes de `../xkyhold/s
 
 ### 4.9 Distribuição
 
-AppImage, `.deb` e `.rpm` pelo empacotador do Tauri, publicados nas releases do GitHub. AUR e Flatpak ficam para depois (o Flatpak limita o acesso à home e não combina com o objetivo). Sem atualizador interno na primeira versão.
+AppImage, `.deb` e `.rpm` pelo empacotador do Tauri, publicados nas releases do GitHub. AUR e Flatpak ficam para depois (o Flatpak limita o acesso à home e não combina com o objetivo). A primeira versão (1.0.x) saiu sem atualizador interno. **Decidido a 15/11/2026:** avisos de versão nova com um botão "Atualizar", na lx e na web, segundo o `docs/UPDATES.md` (decisões U1–U5 na secção 5 desse ficheiro).
 
 ## 5. Fases
 
