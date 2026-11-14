@@ -293,7 +293,7 @@ pub fn run_backup(
     let mut lock = Lock::acquire(dest.clone(), LockKind::Backup, &device)?;
     let result = (|| {
         repo.refresh_index()?;
-        let parent = repo.list_snapshots()?.into_iter().rev().find(|s| s.device == device && s.home.is_some());
+        let parent = latest_of(repo, &device, &home)?;
         let mut options = BackupOptions::new(device.clone(), now_iso());
         options.parent = parent.as_ref();
         options.exclusions = exclusions;
@@ -373,10 +373,20 @@ pub fn entries(repo: &Repo, snap: &Snapshot, path: &[&[u8]]) -> Result<Vec<Entry
     }
 }
 
-/// The latest backup this computer made of its home folder, if any.
+/// The latest backup this computer made of this home folder, if any.
+/// Another user of the same computer has a home of their own: their
+/// backups are not this one's.
 pub fn latest_of_this_computer(repo: &Repo) -> Result<Option<Snapshot>> {
-    let device = device();
-    Ok(repo.list_snapshots()?.into_iter().rev().find(|s| s.device == device && s.home.is_some()))
+    latest_of(repo, &device(), &home()?)
+}
+
+fn latest_of(repo: &Repo, device: &str, home: &Path) -> Result<Option<Snapshot>> {
+    let home = home.to_string_lossy();
+    Ok(repo
+        .list_snapshots()?
+        .into_iter()
+        .rev()
+        .find(|s| s.device == device && s.home.as_ref().is_some_and(|h| h.path == home)))
 }
 
 /// The choices of what to save, as a backup recorded them (FORMAT-v2.md
@@ -478,6 +488,29 @@ mod tests {
         assert_eq!(what.presets, ["node-modules"]);
         assert_eq!(what.patterns, ["**/*.iso"]);
         assert_eq!(what.cross_mounts, ["Data"]);
+    }
+
+    /// Two users of one computer share a backup: each sees only its own.
+    #[test]
+    fn the_latest_backup_is_of_this_home() {
+        use xkyhold_core::backup::{BackupOptions, backup};
+        use xkyhold_core::crypto::Argon2Params;
+        use xkyhold_core::destination::MemoryDestination;
+        let fast = Argon2Params { memory_kib: 1024, iterations: 1, parallelism: 1 };
+        let dest: Arc<dyn Destination> = Arc::new(MemoryDestination::default());
+        let (mut repo, _) = Repository::create(dest, "pw", fast, "t".into(), Options::default()).unwrap();
+        let (one, two) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        for (home, time) in [(&one, "2026-11-14T10:00:00.000Z"), (&two, "2026-11-14T11:00:00.000Z")] {
+            std::fs::write(home.path().join("f"), time).unwrap();
+            let mut o = BackupOptions::new("pc".into(), time.into());
+            o.mount_points = Some(std::collections::HashSet::new());
+            backup(&mut repo, home.path(), o, &mut |_| {}).unwrap();
+        }
+        let of = |home: &Path, device: &str| latest_of(&repo, device, home).unwrap().map(|s| s.time);
+        assert_eq!(of(one.path(), "pc").as_deref(), Some("2026-11-14T10:00:00.000Z"));
+        assert_eq!(of(two.path(), "pc").as_deref(), Some("2026-11-14T11:00:00.000Z"));
+        assert_eq!(of(Path::new("/home/new"), "pc"), None);
+        assert_eq!(of(one.path(), "other"), None);
     }
 
     #[test]
