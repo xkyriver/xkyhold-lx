@@ -136,6 +136,11 @@ pub struct Repository<D: Destination + 'static> {
     uploader: Mutex<Option<Uploader>>,
     /// The first upload failure, reported at the next save or flush.
     upload_error: Option<Error>,
+    /// Packs that hold data blobs. The others hold only trees and are read
+    /// whole (see `tree_pack`).
+    data_packs: HashSet<String>,
+    /// Whole tree packs read so far, by name.
+    tree_packs: Mutex<HashMap<String, Arc<Vec<u8>>>>,
 }
 
 impl<D: Destination + 'static> Repository<D> {
@@ -147,6 +152,8 @@ impl<D: Destination + 'static> Repository<D> {
             options,
             index: HashMap::new(),
             index_names: HashSet::new(),
+            data_packs: HashSet::new(),
+            tree_packs: Mutex::new(HashMap::new()),
             writers: HashMap::new(),
             pending: HashSet::new(),
             unindexed: Vec::new(),
@@ -225,6 +232,55 @@ impl<D: Destination + 'static> Repository<D> {
         self.options.cache.as_ref().map(|c| c.join(&self.config.repo_id).join("index"))
     }
 
+    fn tree_cache_dir(&self) -> Option<PathBuf> {
+        self.options.cache.as_ref().map(|c| c.join(&self.config.repo_id).join("trees"))
+    }
+
+    /// A whole pack of trees: from memory, the local cache (verified, since
+    /// a pack is named by its SHA-256) or the destination in one request.
+    /// Reading the trees of a backup one by one costs a request per folder,
+    /// tens of thousands on Google Drive; their packs are only a few.
+    fn tree_pack(&self, name: &str) -> Result<Arc<Vec<u8>>> {
+        if let Some(pack) = self.tree_packs.lock().unwrap().get(name) {
+            return Ok(pack.clone());
+        }
+        let cache = self.tree_cache_dir();
+        let cached = cache.as_ref().and_then(|c| std::fs::read(c.join(name)).ok()).filter(|b| sha256_hex(b) == name);
+        let bytes = match cached {
+            Some(bytes) => bytes,
+            None => {
+                let bytes = self.dest.get(Dir::Packs, name, None)?;
+                if sha256_hex(&bytes) != name {
+                    return Err(Error::Authentication("pack does not match its name"));
+                }
+                if let Some(dir) = cache {
+                    // Best effort: a cache that cannot be written only costs downloads.
+                    let _ = std::fs::create_dir_all(&dir).and_then(|()| {
+                        let temp = dir.join(format!(".tmp-{}", random_id()));
+                        std::fs::write(&temp, &bytes)?;
+                        std::fs::rename(&temp, dir.join(name))
+                    });
+                }
+                bytes
+            }
+        };
+        let pack = Arc::new(bytes);
+        self.tree_packs.lock().unwrap().insert(name.to_owned(), pack.clone());
+        Ok(pack)
+    }
+
+    /// Drops cached tree packs the index no longer mentions (pruned).
+    fn prune_tree_cache(&self) {
+        let Some(dir) = self.tree_cache_dir() else { return };
+        let Ok(items) = std::fs::read_dir(&dir) else { return };
+        let live: HashSet<&str> = self.index.values().map(|l| l.pack.as_str()).collect();
+        for item in items.flatten() {
+            if !live.contains(item.file_name().to_string_lossy().as_ref()) {
+                let _ = std::fs::remove_file(item.path());
+            }
+        }
+    }
+
     /// An index file, from the local cache when it holds a verified copy.
     fn index_file(&self, name: &str) -> Result<Vec<u8>> {
         let cache = self.cache_dir();
@@ -267,8 +323,11 @@ impl<D: Destination + 'static> Repository<D> {
                 }
             }
         }
+        self.data_packs =
+            index.values().filter(|l: &&Located| l.entry.kind == BlobType::Data).map(|l| l.pack.clone()).collect();
         self.index = index;
         self.prune_cache(&names);
+        self.prune_tree_cache();
         self.index_names = names.into_iter().collect();
         Ok(())
     }
@@ -306,6 +365,8 @@ impl<D: Destination + 'static> Repository<D> {
     /// Forgets every blob that lives in one of these packs.
     pub fn drop_packs(&mut self, names: &HashSet<String>) {
         self.index.retain(|_, l| !names.contains(&l.pack));
+        self.data_packs.retain(|p| !names.contains(p));
+        self.tree_packs.lock().unwrap().retain(|p, _| !names.contains(p));
     }
 
     fn seal_index(&self, file: &IndexFile) -> (String, Vec<u8>) {
@@ -393,6 +454,9 @@ impl<D: Destination + 'static> Repository<D> {
             Ok((name, blobs, len)) => {
                 self.uploaded_bytes += len;
                 for blob in &blobs {
+                    if blob.kind == BlobType::Data {
+                        self.data_packs.insert(name.clone());
+                    }
                     self.index.insert(blob.id.clone(), Located { pack: name.clone(), entry: blob.clone() });
                     self.pending.remove(&blob.id);
                 }
@@ -494,11 +558,18 @@ impl<D: Destination + 'static> Repository<D> {
         if located.entry.kind != kind {
             return Err(Error::Authentication("blob has the wrong type"));
         }
-        let sealed = match self.dest.get(Dir::Packs, &located.pack, Some((located.entry.offset, located.entry.length)))
-        {
-            Err(Error::NotFound(_)) => return Err(Error::MissingBlob(short(id))),
-            other => other?,
+        let missing = |e| match e {
+            Error::NotFound(_) => Error::MissingBlob(short(id)),
+            e => e,
         };
+        if kind == BlobType::Tree && !self.data_packs.contains(&located.pack) {
+            let pack = self.tree_pack(&located.pack).map_err(missing)?;
+            let (start, end) = (located.entry.offset as usize, (located.entry.offset + located.entry.length) as usize);
+            let sealed = pack.get(start..end).ok_or(Error::Authentication("blob lies outside its pack"))?;
+            return read_blob(&self.keys, &located.entry, sealed);
+        }
+        let range = Some((located.entry.offset, located.entry.length));
+        let sealed = self.dest.get(Dir::Packs, &located.pack, range).map_err(missing)?;
         read_blob(&self.keys, &located.entry, &sealed)
     }
 
