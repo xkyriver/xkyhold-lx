@@ -1,7 +1,7 @@
 //! Check (FORMAT.md 10.5).
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc;
 
 use crate::bytes::sha256_hex;
@@ -43,6 +43,7 @@ impl CheckReport {
 pub fn check<D: Destination + 'static>(
     repo: &Repository<D>,
     full: bool,
+    cancel: Option<&AtomicBool>,
     on_progress: &mut dyn FnMut(usize),
 ) -> Result<CheckReport> {
     let mut report = CheckReport::default();
@@ -113,6 +114,10 @@ pub fn check<D: Destination + 'static>(
                 }
                 report.blobs_checked += 1;
                 on_progress(report.blobs_checked);
+                if cancel.is_some_and(|c| c.load(Ordering::Relaxed)) {
+                    next.store(usize::MAX / 2, Ordering::SeqCst);
+                    fatal.get_or_insert(Error::Aborted);
+                }
             }
         });
         if let Some(e) = fatal {

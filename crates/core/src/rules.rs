@@ -43,10 +43,12 @@ pub struct Exclusions {
     pub repository: Option<Vec<u8>>,
 }
 
-const DEFAULTS: &[(&str, &[&str])] = &[
+/// Always left out, whatever the settings.
+pub const DEFAULTS: &[(&str, &[&str])] = &[
     ("cache", &[".cache"]),
     ("trash", &[".local/share/Trash"]),
-    ("app-state", &[".cache/xkyhold-lx", ".local/state/xkyhold-lx"]),
+    // The window's web view keeps its data under the app identifier.
+    ("app-state", &[".cache/xkyhold-lx", ".local/state/xkyhold-lx", ".local/share/com.xkyriver.xkyhold-lx"]),
 ];
 
 /// Whether a path is kept or left out.

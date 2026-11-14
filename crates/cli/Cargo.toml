@@ -14,12 +14,9 @@ path = "src/main.rs"
 [dependencies]
 clap.workspace = true
 rpassword.workspace = true
+xkyhold-app.workspace = true
 xkyhold-core.workspace = true
-xkyhold-dest-local.workspace = true
 xkyhold-dest-drive.workspace = true
-xkyhold-secrets.workspace = true
-serde.workspace = true
-toml = "0.9"
 zeroize.workspace = true
 
 [dev-dependencies]

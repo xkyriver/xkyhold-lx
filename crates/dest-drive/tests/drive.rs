@@ -106,7 +106,7 @@ fn the_engine_works_on_drive() {
     assert_eq!(forget_older(&repo3, parse_iso("2026-06-01T00:00:00.000Z").unwrap()).unwrap(), 1);
     let pruned = prune(&mut repo3, 0.5).unwrap();
     assert!(pruned.packs_removed > 0, "{pruned:?}");
-    let report = check(&repo3, true, &mut |_| {}).unwrap();
+    let report = check(&repo3, true, None, &mut |_| {}).unwrap();
     assert!(report.ok(), "{report:?}");
     // Nothing deleted for good: trashed files are still there, marked.
     assert!(fake.0.lock().unwrap().files.iter().any(|f| f.trashed));
@@ -149,7 +149,7 @@ fn an_expired_access_token_is_renewed_mid_backup() {
     .unwrap();
     assert!(expired);
     assert!(fake.0.lock().unwrap().token_count > tokens_before, "a new access token was fetched");
-    assert!(check(&repo, true, &mut |_| {}).unwrap().ok());
+    assert!(check(&repo, true, None, &mut |_| {}).unwrap().ok());
 }
 
 #[test]

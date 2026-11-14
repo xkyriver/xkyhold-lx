@@ -1,7 +1,7 @@
 [workspace]
 resolver = "3"
-members = ["crates/core", "crates/dest-local", "crates/dest-drive", "crates/secrets", "crates/cli", "src-tauri"]
-default-members = ["crates/core", "crates/dest-local", "crates/dest-drive", "crates/secrets", "crates/cli"]
+members = ["crates/core", "crates/dest-local", "crates/dest-drive", "crates/secrets", "crates/app", "crates/cli", "src-tauri"]
+default-members = ["crates/core", "crates/dest-local", "crates/dest-drive", "crates/secrets", "crates/app", "crates/cli"]
 
 [workspace.package]
 version = "0.1.0"
@@ -15,6 +15,7 @@ xkyhold-core = { path = "crates/core" }
 xkyhold-dest-local = { path = "crates/dest-local" }
 xkyhold-dest-drive = { path = "crates/dest-drive" }
 xkyhold-secrets = { path = "crates/secrets" }
+xkyhold-app = { path = "crates/app" }
 aes-gcm = "0.11"
 argon2 = "0.6"
 base64 = "0.23"

@@ -89,7 +89,7 @@ fn noise(len: usize, seed: u32) -> Vec<u8> {
 /// Every remaining snapshot restores, and a full check passes.
 fn assert_restorable(dest: &Arc<Flaky>) {
     let repo = Repository::open(dest.clone(), &credential(), small()).unwrap();
-    let report = check(&repo, true, &mut |_| {}).unwrap();
+    let report = check(&repo, true, None, &mut |_| {}).unwrap();
     assert!(report.ok(), "{report:?}");
     for snap in repo.list_snapshots().unwrap() {
         let out = tempfile::tempdir().unwrap();
@@ -220,4 +220,45 @@ fn the_index_cache_saves_downloads_and_ignores_a_bad_copy() {
     std::fs::write(&one, b"garbage").unwrap();
     Repository::open(dest.clone(), &credential(), with_cache()).unwrap();
     assert_eq!(dest.index_gets.load(Ordering::SeqCst), files + 1);
+}
+
+/// A backup stopped halfway keeps what it already uploaded: the next
+/// backup sends only the rest, and the repository stays sound.
+#[test]
+fn a_stopped_backup_is_continued_by_the_next_one() {
+    use std::sync::atomic::AtomicBool;
+    let home = tempfile::tempdir().unwrap();
+    for i in 0..20 {
+        std::fs::write(home.path().join(format!("f{i:02}")), noise(3000, i)).unwrap();
+    }
+    let dest = Arc::new(Flaky::default());
+    let one_upload = || Options { uploads: 1, ..small() };
+    let (mut repo, _) = Repository::create(dest.clone(), "pw", FAST, "t".into(), one_upload()).unwrap();
+    let stop = AtomicBool::new(false);
+    let mut first = options("2026-01-01T00:00:00.000Z");
+    first.cancel = Some(&stop);
+    let mut seen = 0;
+    let stopped = backup(&mut repo, home.path(), first, &mut |p| {
+        seen = p.files;
+        if p.files >= 10 {
+            stop.store(true, Ordering::SeqCst);
+        }
+    });
+    assert!(matches!(stopped, Err(Error::Aborted)), "{stopped:?}");
+    assert!(seen >= 10);
+    let sent_before = repo.uploaded_bytes;
+    assert!(sent_before > 0);
+
+    // A new session, as after closing the window.
+    let mut repo = Repository::open(dest.clone(), &credential(), one_upload()).unwrap();
+    let snap = backup(&mut repo, home.path(), options("2026-01-01T00:01:00.000Z"), &mut |_| {}).unwrap();
+    assert_eq!(snap.stats.files, 20);
+    let total: u64 = 20 * 3000;
+    assert!(
+        repo.uploaded_bytes < total - sent_before / 2,
+        "sent {} again after {} were already uploaded",
+        repo.uploaded_bytes,
+        sent_before
+    );
+    assert_restorable(&dest);
 }

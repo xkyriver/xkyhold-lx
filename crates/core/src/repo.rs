@@ -476,11 +476,17 @@ impl<D: Destination + 'static> Repository<D> {
 
     /// Forgets blobs that were queued but never stored. Must be called when
     /// a backup fails, or `has` would claim data that is not there.
+    ///
+    /// Packs whose upload finished are still written to the index (best
+    /// effort), so a stopped backup does not send them again next time.
     pub fn abandon(&mut self) {
         self.writers.clear();
         self.wait_all();
         self.pending.clear();
         self.upload_error = None;
+        if !self.unindexed.is_empty() {
+            let _ = self.write_index();
+        }
     }
 
     pub fn load_blob(&self, kind: BlobType, id: &str) -> Result<Vec<u8>> {

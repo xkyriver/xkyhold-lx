@@ -328,7 +328,7 @@ fn restore_never_writes_through_a_link_in_the_target() {
         restore(&repo, &notes, &f.out, &RestoreOptions { conflict, cancel: None }, &mut |_| {}).unwrap();
         assert_eq!(std::fs::read(&victim).unwrap(), b"untouched", "{conflict:?}");
     }
-    assert_eq!(std::fs::read(f.out.join("notes.txt (restored)")).unwrap(), b"hello world");
+    assert_eq!(std::fs::read(f.out.join("notes (restored).txt")).unwrap(), b"hello world");
     // Replace swapped the link itself for the file.
     assert!(std::fs::symlink_metadata(f.out.join("notes.txt")).unwrap().is_file());
 }

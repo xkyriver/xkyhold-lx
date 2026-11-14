@@ -5,35 +5,30 @@
 //! The password comes from `XKYHOLD_LX_PASSWORD` or is asked on the
 //! terminal; it is never stored.
 
-use std::os::unix::ffi::OsStrExt;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
 
 use clap::{Parser, Subcommand, ValueEnum};
-use serde::{Deserialize, Serialize};
-use xkyhold_core::backup::{BackupOptions, backup};
+use xkyhold_app::{LastBackup, Settings, Target, What, human};
 use xkyhold_core::check::check;
 use xkyhold_core::crypto::{Credential, DEFAULT_ARGON2};
 use xkyhold_core::destination::Destination;
-use xkyhold_core::lock::{Lock, LockKind};
-use xkyhold_core::prune::{forget_older, prune};
-use xkyhold_core::repo::{Options, Repository};
-use xkyhold_core::restore::{Conflict, RestoreOptions, find, restore};
-use xkyhold_core::rules::{Exclusions, PRESETS};
+use xkyhold_core::repo::Repository;
+use xkyhold_core::restore::{Conflict, RestoreOptions, restore};
+use xkyhold_core::rules::PRESETS;
 use xkyhold_core::snapshot::Snapshot;
-use xkyhold_core::time::{now_iso, now_ms};
+use xkyhold_core::time::now_iso;
 use xkyhold_core::tree::{Entry, EntryKind};
 use xkyhold_core::{Error, Result};
-use xkyhold_dest_drive::{Client, Drive, DriveFolder, Http, RefreshingTokens, Ureq, sign_in};
-use xkyhold_dest_local::LocalFolder;
-use xkyhold_secrets::{SecretService, SecretStore, google_refresh, repo_key};
+use xkyhold_dest_drive::DriveFolder;
 use zeroize::Zeroizing;
 
 #[derive(Parser)]
 #[command(name = "xkyhold-lx-cli", version, about = "Encrypted backup of your home folder")]
 struct Cli {
     /// The backup: a folder on this computer (an external disk, a NAS).
+    /// Without --repo or --drive, the backup set up on this computer.
     #[arg(long, global = true, env = "XKYHOLD_LX_REPO", conflicts_with = "drive")]
     repo: Option<PathBuf>,
     /// The backup: the folder XkyHold/<NAME> in your Google Drive (see `login`).
@@ -129,114 +124,37 @@ enum ConflictArg {
     KeepBoth,
 }
 
-type Repo = Repository<Arc<dyn Destination>>;
+type Repo = xkyhold_app::Repo;
 
-fn home() -> Result<PathBuf> {
-    let home = std::env::var_os("HOME").map(PathBuf::from).ok_or(Error::OutsideHome("$HOME is not set".into()))?;
-    if !home.is_absolute() || home == Path::new("/") {
-        return Err(Error::OutsideHome(home.display().to_string()));
+/// The backup named by `--repo` / `--drive`, else the one set up on this
+/// computer (by the window or an earlier command).
+fn target(cli: &Cli, settings: &Settings) -> Result<(Target, bool)> {
+    if let Some(name) = &cli.drive {
+        return Ok((Target::Drive { name: name.clone() }, false));
     }
-    Ok(home)
-}
-
-fn device() -> String {
-    std::fs::read_to_string("/proc/sys/kernel/hostname").map(|h| h.trim().to_owned()).unwrap_or_else(|_| "linux".into())
-}
-
-#[derive(Default, Serialize, Deserialize)]
-struct Settings {
-    /// The Google account connected on this computer.
-    account: Option<String>,
-}
-
-fn xdg(var: &str, fallback: &str) -> Result<PathBuf> {
-    match std::env::var_os(var) {
-        Some(dir) if Path::new(&dir).is_absolute() => Ok(PathBuf::from(dir).join("xkyhold-lx")),
-        _ => Ok(home()?.join(fallback).join("xkyhold-lx")),
+    if let Some(path) = &cli.repo {
+        return Ok((Target::Local { path: std::path::absolute(path)? }, false));
     }
-}
-
-fn settings_path() -> Result<PathBuf> {
-    Ok(xdg("XDG_CONFIG_HOME", ".config")?.join("config.toml"))
-}
-
-fn load_settings() -> Result<Settings> {
-    match std::fs::read_to_string(settings_path()?) {
-        Ok(text) => toml::from_str(&text).map_err(|e| Error::Format(format!("config.toml: {e}"))),
-        Err(_) => Ok(Settings::default()),
+    match &settings.backup {
+        Some(t) => Ok((t.clone(), true)),
+        None => Err(Error::Usage("say where the backup is with --repo or --drive, or set it up in the window".into())),
     }
-}
-
-fn save_settings(settings: &Settings) -> Result<()> {
-    let path = settings_path()?;
-    std::fs::create_dir_all(path.parent().expect("has a parent"))?;
-    std::fs::write(path, toml::to_string(settings).expect("serializable"))?;
-    Ok(())
-}
-
-fn secrets() -> Result<SecretService> {
-    SecretService::connect().map_err(|e| Error::Usage(e.to_string()))
-}
-
-fn client() -> Result<Client> {
-    Client::from_env().ok_or_else(|| {
-        Error::Usage("this build has no Google client; set XKYHOLD_LX_CLIENT_ID and XKYHOLD_LX_CLIENT_SECRET".into())
-    })
-}
-
-fn drive_client_limited(cli: &Cli) -> Result<Drive> {
-    let mut drive = drive_client()?;
-    if let Some(kb) = cli.limit_upload {
-        drive.limit_uploads(kb * 1000);
-    }
-    Ok(drive)
-}
-
-fn drive_client() -> Result<Drive> {
-    let account =
-        load_settings()?.account.ok_or_else(|| Error::Session("not connected to Google Drive; run `login`".into()))?;
-    let refresh = secrets()?
-        .get(&google_refresh(&account))
-        .map_err(|e| Error::Usage(e.to_string()))?
-        .ok_or_else(|| Error::Session("not connected to Google Drive; run `login`".into()))?;
-    let refresh = String::from_utf8(refresh).map_err(|_| Error::Session("run `login` again".into()))?;
-    let http: Arc<dyn Http> = Arc::new(Ureq::default());
-    Ok(Drive::new(http.clone(), Arc::new(RefreshingTokens::new(http, client()?, refresh))))
 }
 
 fn destination(cli: &Cli) -> Result<(Arc<dyn Destination>, Option<PathBuf>)> {
-    if let Some(name) = &cli.drive {
-        let folder = DriveFolder::open(drive_client_limited(cli)?, name)?;
-        folder.warm()?;
-        return Ok((Arc::new(folder), None));
-    }
-    let Some(path) = &cli.repo else {
-        return Err(Error::Usage("say where the backup is with --repo or --drive".into()));
-    };
-    let path = std::path::absolute(path)?;
-    Ok((Arc::new(LocalFolder::new(&path)), Some(path)))
-}
-
-fn options() -> Options {
-    Options { cache: xdg("XDG_CACHE_HOME", ".cache").ok(), ..Options::default() }
+    let settings = Settings::load()?;
+    let (target, _) = target(cli, &settings)?;
+    xkyhold_app::destination(&target, &settings, cli.limit_upload)
 }
 
 /// Opens with the password (or recovery key) when given, else with the
 /// key kept in the keyring, else asks for the password.
 fn open_dest(cli: &Cli, dest: Arc<dyn Destination>) -> Result<Repo> {
     let explicit = cli.recovery_key || std::env::var_os("XKYHOLD_LX_PASSWORD").is_some();
-    if !explicit {
-        let config = Repository::read_config(&dest)?;
-        if let Ok(store) = SecretService::connect()
-            && let Ok(Some(master)) = store.get(&repo_key(&config.repo_id))
-        {
-            match Repository::open(dest.clone(), &Credential::MasterKey(Zeroizing::new(master)), options()) {
-                Err(Error::WrongKey) => {}
-                other => return other,
-            }
-        }
+    if !explicit && let Some(repo) = xkyhold_app::open_with_keyring(dest.clone())? {
+        return Ok(repo);
     }
-    Repository::open(dest, &credential(cli)?, options())
+    xkyhold_app::open_with(dest, &credential(cli)?)
 }
 
 fn ask(prompt: &str, env: &str) -> Result<Zeroizing<String>> {
@@ -270,135 +188,56 @@ fn ticker() -> impl FnMut(&xkyhold_core::backup::Progress) {
     }
 }
 
-/// A path inside the home folder, relative to it. Refuses anything outside.
-fn inside_home(home: &Path, path: &Path) -> Result<Vec<u8>> {
-    let absolute = if path.is_absolute() { path.to_path_buf() } else { home.join(path) };
-    let mut parts: Vec<&[u8]> = Vec::new();
-    for c in absolute.strip_prefix(home).map_err(|_| Error::OutsideHome(path.display().to_string()))?.components() {
-        match c {
-            std::path::Component::Normal(name) => parts.push(name.as_bytes()),
-            std::path::Component::CurDir => {}
-            _ => return Err(Error::OutsideHome(path.display().to_string())),
-        }
-    }
-    Ok(parts.join(&b'/'))
-}
-
-fn pick(repo: &Repo, wanted: &str) -> Result<Snapshot> {
-    let snapshots = repo.list_snapshots()?;
-    let found = if wanted == "latest" {
-        snapshots.last().cloned()
-    } else {
-        let matching: Vec<_> = snapshots.iter().filter(|s| s.id.starts_with(wanted)).collect();
-        if matching.len() > 1 {
-            return Err(Error::Usage(format!("\"{wanted}\" matches more than one backup")));
-        }
-        matching.first().map(|s| (*s).clone())
-    };
-    found.ok_or_else(|| Error::Usage(format!("no backup \"{wanted}\"")))
-}
-
 fn split_path(path: &str) -> Vec<&[u8]> {
     path.split('/').filter(|p| !p.is_empty()).map(str::as_bytes).collect()
 }
 
 fn root_and_entries(repo: &Repo, snap: &Snapshot, path: Option<&str>) -> Result<Vec<Entry>> {
-    let root = snap.roots.first().ok_or_else(|| Error::Format("backup without folders".into()))?;
-    let mut names = path.map(split_path).unwrap_or_default();
-    // Version 1 backups hold several folders: the first name picks one.
-    let tree = if snap.roots.len() > 1 || root.source.is_none() {
-        let first = names.first().copied().unwrap_or_default();
-        let chosen = snap.roots.iter().find(|r| r.name.as_bytes() == first);
-        match chosen {
-            Some(r) => {
-                names.remove(0);
-                r.tree.clone()
-            }
-            None if names.is_empty() => {
-                return Ok(snap
-                    .roots
-                    .iter()
-                    .map(|r| Entry {
-                        name: r.name.as_bytes().to_vec(),
-                        kind: EntryKind::Dir { subtree: r.tree.clone(), mount: false },
-                        meta: Default::default(),
-                    })
-                    .collect());
-            }
-            None => {
-                return Err(Error::Usage(format!("no folder \"{}\" in this backup", String::from_utf8_lossy(first))));
-            }
-        }
-    } else {
-        root.tree.clone()
-    };
-    if names.is_empty() {
-        return repo.load_tree(&tree);
-    }
-    match find(repo, &tree, &names)? {
-        Some(Entry { kind: EntryKind::Dir { subtree, .. }, .. }) => repo.load_tree(&subtree),
-        Some(entry) => Ok(vec![entry]),
-        None => Err(Error::Usage(format!("nothing at \"{}\" in this backup", path.unwrap_or_default()))),
-    }
-}
-
-fn human(bytes: u64) -> String {
-    let units = ["B", "KB", "MB", "GB", "TB"];
-    let mut value = bytes as f64;
-    let mut unit = 0;
-    while value >= 1000.0 && unit < units.len() - 1 {
-        value /= 1000.0;
-        unit += 1;
-    }
-    if unit == 0 { format!("{bytes} B") } else { format!("{value:.1} {}", units[unit]) }
+    let names = path.map(split_path).unwrap_or_default();
+    xkyhold_app::entries(repo, snap, &names).map_err(|e| match e {
+        Error::NotFound(_) => Error::Usage(format!("nothing at \"{}\" in this backup", path.unwrap_or_default())),
+        e => e,
+    })
 }
 
 fn run(cli: &Cli) -> Result<()> {
     match &cli.command {
         Command::Login { no_browser } => {
-            let client = client()?;
-            let http = Ureq::default();
-            let signed = sign_in(&http, &client, &mut |url| {
+            let account = xkyhold_app::google_sign_in(&mut |url| {
                 if *no_browser || std::process::Command::new("xdg-open").arg(url).status().is_err() {
                     println!("Open this address in your browser to connect XkyHold-lx:\n\n{url}\n");
                 } else {
                     println!("Your browser opened Google's sign-in page. Waiting for you to finish there…");
                 }
             })?;
-            let http: Arc<dyn Http> = Arc::new(http);
-            let tokens = Arc::new(RefreshingTokens::new(http.clone(), client, signed.refresh.clone()));
-            let account = Drive::new(http, tokens).about_email()?;
-            secrets()?
-                .set(&google_refresh(&account), signed.refresh.as_bytes())
-                .map_err(|e| Error::Usage(e.to_string()))?;
-            save_settings(&Settings { account: Some(account.clone()) })?;
+            let mut settings = Settings::load()?;
+            settings.account = Some(account.clone());
+            settings.save()?;
             println!("Connected to the Google Drive of {account}.");
         }
         Command::Logout => {
-            let mut settings = load_settings()?;
+            let mut settings = Settings::load()?;
             if let Some(account) = settings.account.take() {
-                secrets()?.delete(&google_refresh(&account)).map_err(|e| Error::Usage(e.to_string()))?;
-                save_settings(&settings)?;
+                xkyhold_app::google_sign_out(&account)?;
+                settings.save()?;
                 println!("Disconnected from the Google Drive of {account} on this computer.");
             }
         }
         Command::Backups => {
-            for name in DriveFolder::list_repositories(&drive_client()?)? {
+            for name in DriveFolder::list_repositories(&xkyhold_app::drive_client(&Settings::load()?, None)?)? {
                 println!("{name}");
             }
         }
         Command::Remember => {
             let (dest, _) = destination(cli)?;
-            let repo = Repository::open(dest, &credential(cli)?, options())?;
-            secrets()?
-                .set(&repo_key(&repo.config.repo_id), repo.keys.master_key())
-                .map_err(|e| Error::Usage(e.to_string()))?;
+            let repo = xkyhold_app::open_with(dest, &credential(cli)?)?;
+            xkyhold_app::remember_key(&repo, true)?;
             println!("This computer now opens this backup without the password.");
         }
         Command::ForgetKey => {
             let (dest, _) = destination(cli)?;
             let config = Repository::read_config(&dest)?;
-            secrets()?.delete(&repo_key(&config.repo_id)).map_err(|e| Error::Usage(e.to_string()))?;
+            xkyhold_app::forget_key(&config.repo_id)?;
             println!("This computer will ask for the password again.");
         }
         Command::Presets => {
@@ -412,59 +251,70 @@ fn run(cli: &Cli) -> Result<()> {
             if std::env::var("XKYHOLD_LX_PASSWORD").is_err() && *ask("Repeat it: ", "-")? != *password {
                 return Err(Error::Usage("the passwords are different".into()));
             }
-            let (_, recovery) = Repository::create(dest, &password, DEFAULT_ARGON2, now_iso(), options())?;
+            let (_, recovery) =
+                Repository::create(dest, &password, DEFAULT_ARGON2, now_iso(), xkyhold_app::cache_options())?;
             println!(
                 "Backup created.\n\nRecovery key (keep it away from this computer; it is shown only once):\n\n  {}\n",
                 *recovery
             );
         }
         Command::Backup { only, leave_out, presets, patterns, cross_mounts } => {
-            let home = home()?;
-            let (dest, repo_path) = destination(cli)?;
+            let mut settings = Settings::load()?;
+            let (target, configured) = target(cli, &settings)?;
+            let (dest, repo_path) = xkyhold_app::destination(&target, &settings, cli.limit_upload)?;
             let mut repo = open_dest(cli, dest.clone())?;
-            let rel = |paths: &[PathBuf]| paths.iter().map(|p| inside_home(&home, p)).collect::<Result<Vec<_>>>();
-            for id in presets {
-                if !PRESETS.iter().any(|p| p.id == id) {
-                    return Err(Error::Usage(format!("unknown preset \"{id}\"; see `presets`")));
-                }
-            }
-            let exclusions = Exclusions {
+            let text = |paths: &[PathBuf]| paths.iter().map(|p| p.to_string_lossy().into_owned()).collect::<Vec<_>>();
+            let flags = What {
+                only: text(only),
+                leave_out: text(leave_out),
                 presets: presets.clone(),
-                paths: rel(leave_out)?,
                 patterns: patterns.clone(),
-                cross_mounts: rel(cross_mounts)?,
-                repository: repo_path.and_then(|p| inside_home(&home, &p).ok()),
+                cross_mounts: text(cross_mounts),
             };
-            let device = device();
-            let mut lock = Lock::acquire(dest, LockKind::Backup, &device)?;
-            repo.refresh_index()?;
-            let parent = repo.list_snapshots()?.into_iter().rev().find(|s| s.device == device && s.home.is_some());
-            let mut options = BackupOptions::new(device, now_iso());
-            options.parent = parent.as_ref();
-            options.exclusions = exclusions;
-            options.selection = if only.is_empty() { None } else { Some(rel(only)?) };
+            // With no choices on the command line, the configured backup
+            // keeps what was chosen in the window, and its retention.
+            let use_settings = configured && flags == What::default();
+            let what = if use_settings { settings.what.clone() } else { flags };
+            let keep = if use_settings { settings.keep_months } else { 0 };
             let started = std::time::Instant::now();
-            let snap = backup(&mut repo, &home, options, &mut ticker());
-            lock.release();
-            let snap = snap?;
+            let done = xkyhold_app::run_backup(
+                &mut repo,
+                dest,
+                repo_path.as_deref(),
+                &what,
+                keep,
+                None,
+                &mut ticker(),
+                &mut || eprintln!("  removing old backups…"),
+            )?;
+            let snap = &done.snapshot;
             let s = &snap.stats;
+            if configured {
+                settings.last_backup =
+                    Some(LastBackup { time: snap.time.clone(), files: s.files, bytes: s.bytes, skipped: s.skipped });
+                settings.save()?;
+            }
             println!(
                 "Backup {} done in {} s: {} files ({}), {} sent.",
                 &snap.id[..8],
                 started.elapsed().as_secs(),
                 s.files,
                 human(s.bytes),
-                human(repo.uploaded_bytes)
+                human(done.uploaded)
             );
             for (count, what) in [
                 (s.skipped, "could not be read and were skipped"),
                 (s.changed.unwrap_or(0), "changed while being read (stored as read)"),
                 (s.special.unwrap_or(0), "special files (sockets, pipes, devices) are never stored"),
                 (s.mounts.unwrap_or(0), "other disks inside your home folder were not backed up"),
+                (done.forgotten as u64, "old backups were removed"),
             ] {
                 if count > 0 {
                     println!("  {count} {what}");
                 }
+            }
+            if let Some(e) = done.cleanup_error {
+                eprintln!("Old backups could not be removed this time ({e}); the new backup is safe.");
             }
         }
         Command::Snapshots => {
@@ -484,7 +334,7 @@ fn run(cli: &Cli) -> Result<()> {
         }
         Command::Ls { snapshot, path } => {
             let repo = open(cli)?;
-            let snap = pick(&repo, snapshot)?;
+            let snap = xkyhold_app::pick(&repo, snapshot)?;
             for e in root_and_entries(&repo, &snap, path.as_deref())? {
                 let (kind, size, extra) = match &e.kind {
                     EntryKind::File { size, .. } => ("-", human(*size), String::new()),
@@ -502,11 +352,11 @@ fn run(cli: &Cli) -> Result<()> {
             }
         }
         Command::Restore { snapshot, paths, to, conflict } => {
-            let home = home()?;
+            let home = xkyhold_app::home()?;
             let target = std::path::absolute(to)?;
-            inside_home(&home, &target)?;
+            xkyhold_app::inside_home(&home, &target)?;
             let repo = open(cli)?;
-            let snap = pick(&repo, snapshot)?;
+            let snap = xkyhold_app::pick(&repo, snapshot)?;
             let mut entries = Vec::new();
             if paths.is_empty() {
                 entries = root_and_entries(&repo, &snap, None)?;
@@ -548,7 +398,7 @@ fn run(cli: &Cli) -> Result<()> {
         }
         Command::Check { full } => {
             let repo = open(cli)?;
-            let report = check(&repo, *full, &mut |_| {})?;
+            let report = check(&repo, *full, None, &mut |_| {})?;
             if report.ok() {
                 println!(
                     "The backup is complete: {} packs, {} pieces of data checked.",
@@ -562,16 +412,8 @@ fn run(cli: &Cli) -> Result<()> {
         Command::Forget { keep_months } => {
             let (dest, path) = destination(cli)?;
             let mut repo = open_dest(cli, dest.clone())?;
-            let since = now_ms() - i64::from(*keep_months) * 2_629_746_000; // average month
-            let mut lock = Lock::acquire(dest, LockKind::Prune, &device())?;
-            let removed = forget_older(&repo, since);
-            let result = removed.and_then(|n| prune(&mut repo, 0.5).map(|p| (n, p)));
-            lock.release();
-            let (n, p) = result?;
-            if let Some(path) = path {
-                LocalFolder::new(path).empty_old_trash()?;
-            }
-            println!("{n} old backups removed; {} freed.", human(p.bytes_freed));
+            let n = xkyhold_app::forget(&mut repo, dest, path.as_deref(), *keep_months)?;
+            println!("{n} old backups removed.");
         }
         Command::Status => {
             let repo = open(cli)?;
