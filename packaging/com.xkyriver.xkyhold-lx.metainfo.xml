@@ -13,7 +13,7 @@
       on your computer before it leaves it; Google and the disk only see ciphertext.
     </p>
     <p xml:lang="pt-PT">
-      A XkyHold-lx faz a cópia de segurança da tua pasta pessoal, inteira ou só das
+      O XkyHold-lx faz a cópia de segurança da tua pasta pessoal, inteira ou só das
       partes que escolheres, para o teu Google Drive ou para uma pasta, por exemplo
       num disco externo. Tudo é cifrado no teu computador antes de sair dele; a Google
       e o disco só veem dados cifrados.
@@ -26,7 +26,7 @@
       <li>A reminder, or automatic backups with the window closed</li>
       <li xml:lang="pt-PT">Um lembrete, ou cópias automáticas com a janela fechada</li>
       <li>Backups made here can also be restored with XkyHold in a web browser</li>
-      <li xml:lang="pt-PT">As cópias feitas aqui também se restauram com a XkyHold no navegador</li>
+      <li xml:lang="pt-PT">As cópias feitas aqui também se restauram com o XkyHold no navegador</li>
     </ul>
   </description>
   <launchable type="desktop-id">xkyhold-lx.desktop</launchable>
