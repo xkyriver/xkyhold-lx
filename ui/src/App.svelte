@@ -135,7 +135,7 @@
   </main>
 
   <footer class="footer">
-    <span>XkyHold-lx v{app.status?.version ?? ''}</span>
+    <span>XkyHold-lx v{app.status?.version ?? ''} <span class="credit">by xkyriver on xion</span></span>
     {#if app.job && app.view !== 'home' && app.job.kind === 'backup'}
       <span>{t('Backing up…')} {formatBytes(app.job.bytes)}</span>
     {/if}
