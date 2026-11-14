@@ -396,7 +396,8 @@ No repositório `xkyhold`, commit `935c1a3` (só local; o push e o deploy são d
 
 ### Depois da 1.0.0 (14/11/2026)
 
-- A pedido do proprietário, a sugestão "Pastas de compilação Rust" só deixa de fora uma pasta `target` quando há um ficheiro `Cargo.toml` ao lado (antes era qualquer pasta `target`). O espaço mostrado segue a mesma regra. O `leftOut` continua a registar `**/target`: a especificação diz que é só para mostrar, e uma pasta `target` guardada está na árvore. Na home do proprietário passam a ser guardadas três pastas `target` de projetos Maven (`pom.xml`, cerca de 48 MB). Testes `a_target_folder_is_left_out_only_beside_cargo_toml` e nas regras e no espaço. Ainda não está numa release.
+- A pedido do proprietário, a sugestão "Pastas de compilação Rust" só deixa de fora uma pasta `target` quando há um ficheiro `Cargo.toml` ao lado (antes era qualquer pasta `target`). O espaço mostrado segue a mesma regra. O `leftOut` continua a registar `**/target`: a especificação diz que é só para mostrar, e uma pasta `target` guardada está na árvore. Na home do proprietário passam a ser guardadas três pastas `target` de projetos Maven (`pom.xml`, cerca de 48 MB). Testes `a_target_folder_is_left_out_only_beside_cargo_toml` e nas regras e no espaço.
+- **v1.0.1 publicada a 14/11/2026** (com o "Sim, publica 1.0.1" do proprietário): etiqueta `v1.0.1` em `4fa5bdb`, release https://github.com/xkyriver/xkyhold-lx/releases/tag/v1.0.1 com os três pacotes e o `SHA256SUMS`. No computador do proprietário, o XkyHold-lx é instalado e atualizado pelo AppMan (`~/Applications/xkyhold-lx`); `appman -u xkyhold-lx` passou para a 1.0.1 (o ficheiro confere com o `SHA256SUMS`) e o temporizador continua no mesmo caminho e corre bem.
 
 ## 8. Questões em aberto
 
