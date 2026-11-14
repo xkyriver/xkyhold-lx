@@ -24,8 +24,9 @@
   line-height: 1.5;
 }
 
+/* Dark: follows the system unless Settings chose a theme (data-theme). */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme='light']) {
     --bg: #0f1319;
     --surface: #181d26;
     --surface-2: #1e2430;
@@ -45,8 +46,40 @@
   }
 }
 
+:root[data-theme='dark'] {
+  --bg: #0f1319;
+  --surface: #181d26;
+  --surface-2: #1e2430;
+  --text: #e7ebf1;
+  --muted: #97a1b1;
+  --border: #2a313e;
+  --accent: #00ffc6;
+  --accent-hover: #5cffd9;
+  --accent-soft: #0d2a25;
+  --accent-text: #02110d;
+  --ok: #62d39a;
+  --ok-soft: #14301f;
+  --warn: #f1b560;
+  --warn-soft: #35270f;
+  --danger: #ff8a80;
+  --shadow: 0 1px 2px rgb(0 0 0 / 30%), 0 4px 16px rgb(0 0 0 / 25%);
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+}
+
 * {
   box-sizing: border-box;
+}
+
+input[type='checkbox'],
+input[type='radio'] {
+  accent-color: var(--accent);
 }
 
 body {
