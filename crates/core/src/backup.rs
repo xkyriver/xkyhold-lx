@@ -202,7 +202,7 @@ impl Names {
     }
 }
 
-struct Walker<'r, 'o, D: Destination> {
+struct Walker<'r, 'o, D: Destination + 'static> {
     repo: &'r mut Repository<D>,
     matcher: Matcher,
     mounts: HashSet<Vec<u8>>,
@@ -215,7 +215,7 @@ struct Walker<'r, 'o, D: Destination> {
     empty_tree: Option<String>,
 }
 
-impl<D: Destination> Walker<'_, '_, D> {
+impl<D: Destination + 'static> Walker<'_, '_, D> {
     fn check_cancel(&self) -> Result<()> {
         match self.cancel {
             Some(flag) if flag.load(Ordering::Relaxed) => Err(Error::Aborted),
@@ -506,7 +506,7 @@ fn lossy(bytes: &[u8]) -> String {
 
 /// Backs up the home folder (or the chosen items inside it) and writes a
 /// version 2 snapshot. `home` must be the user's home folder.
-pub fn backup<D: Destination>(
+pub fn backup<D: Destination + 'static>(
     repo: &mut Repository<D>,
     home: &Path,
     options: BackupOptions<'_>,

@@ -1,7 +1,7 @@
 [workspace]
 resolver = "3"
-members = ["crates/core", "crates/dest-local", "crates/dest-drive", "crates/cli", "src-tauri"]
-default-members = ["crates/core", "crates/dest-local", "crates/dest-drive", "crates/cli"]
+members = ["crates/core", "crates/dest-local", "crates/dest-drive", "crates/secrets", "crates/cli", "src-tauri"]
+default-members = ["crates/core", "crates/dest-local", "crates/dest-drive", "crates/secrets", "crates/cli"]
 
 [workspace.package]
 version = "0.1.0"

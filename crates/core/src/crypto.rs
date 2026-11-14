@@ -29,6 +29,7 @@ pub const CHUNK_SIZE: u64 = 4 * 1024 * 1024;
 pub struct RepoKeys {
     #[zeroize(skip)]
     pub repo_id: String,
+    master: [u8; KEY_LENGTH],
     enc_key: [u8; KEY_LENGTH],
     id_key: [u8; KEY_LENGTH],
 }
@@ -36,11 +37,20 @@ pub struct RepoKeys {
 impl RepoKeys {
     /// Derives the working keys from the master key (section 4.1).
     pub fn derive(master_key: &[u8], repo_id: &str) -> Self {
+        let mut master = [0u8; KEY_LENGTH];
+        master.copy_from_slice(&master_key[..KEY_LENGTH]);
         Self {
             repo_id: repo_id.to_owned(),
+            master,
             enc_key: hkdf_sha256(master_key, &format!("xkyhold/v1/enc/{repo_id}")),
             id_key: hkdf_sha256(master_key, &format!("xkyhold/v1/id/{repo_id}")),
         }
+    }
+
+    /// The master key, to keep in the Secret Service so that automatic
+    /// backups need no password. Never written anywhere else.
+    pub fn master_key(&self) -> &[u8] {
+        &self.master
     }
 
     /// HMAC-SHA-256(idKey, plaintext) as hex: the blob's identity.
@@ -167,6 +177,9 @@ pub struct RepoConfig {
 pub enum Credential {
     Password(Zeroizing<String>),
     RecoveryKey(Zeroizing<String>),
+    /// The master key itself, from the Secret Service. It is checked by the
+    /// first object it decrypts, not here.
+    MasterKey(Zeroizing<Vec<u8>>),
 }
 
 fn key_aad(repo_id: &str) -> String {
@@ -206,6 +219,9 @@ pub fn check_config(config: &RepoConfig) -> Result<()> {
 /// Unwraps the master key with the password or the recovery key.
 pub fn unwrap_master_key(config: &RepoConfig, credential: &Credential) -> Result<Zeroizing<Vec<u8>>> {
     check_config(config)?;
+    if let Credential::MasterKey(master) = credential {
+        return if master.len() == KEY_LENGTH { Ok(master.clone()) } else { Err(Error::WrongKey) };
+    }
     let aad = key_aad(&config.repo_id);
     for slot in &config.keys {
         let kek = match (credential, slot) {

@@ -24,7 +24,7 @@ pub struct PruneResult {
 /// Every blob the snapshots need, trees and data alike. Stops on an
 /// unreadable tree or an unknown entry type: nothing is removed on a guess
 /// (FORMAT-v2.md 4.7).
-pub fn reachable<D: Destination>(repo: &Repository<D>, snapshots: &[Snapshot]) -> Result<HashSet<String>> {
+pub fn reachable<D: Destination + 'static>(repo: &Repository<D>, snapshots: &[Snapshot]) -> Result<HashSet<String>> {
     let mut live = HashSet::new();
     let mut todo: Vec<String> = snapshots.iter().flat_map(|s| s.roots.iter().map(|r| r.tree.clone())).collect();
     while let Some(tree) = todo.pop() {
@@ -47,7 +47,7 @@ pub fn reachable<D: Destination>(repo: &Repository<D>, snapshots: &[Snapshot]) -
 
 /// Frees the space of data no remaining snapshot needs. Packs where less
 /// than `repack_below` of the bytes are still used are rewritten.
-pub fn prune<D: Destination>(repo: &mut Repository<D>, repack_below: f64) -> Result<PruneResult> {
+pub fn prune<D: Destination + 'static>(repo: &mut Repository<D>, repack_below: f64) -> Result<PruneResult> {
     if !repo.writable() {
         return Err(Error::ReadOnly);
     }
@@ -109,7 +109,7 @@ pub fn prune<D: Destination>(repo: &mut Repository<D>, repack_below: f64) -> Res
 
 /// Retention: moves to the trash the snapshots older than `keep_since_ms`,
 /// always keeping the most recent one. Returns how many were removed.
-pub fn forget_older<D: Destination>(repo: &Repository<D>, keep_since_ms: i64) -> Result<usize> {
+pub fn forget_older<D: Destination + 'static>(repo: &Repository<D>, keep_since_ms: i64) -> Result<usize> {
     let snapshots = repo.list_snapshots()?;
     let Some(newest) = snapshots.last().map(|s| s.id.clone()) else { return Ok(0) };
     let mut removed = 0;

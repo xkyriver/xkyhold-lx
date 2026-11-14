@@ -97,7 +97,7 @@ fn group_to_apply(meta: &Meta, mine: &[u32]) -> Option<u32> {
     mine.contains(&gid).then_some(gid)
 }
 
-struct Restorer<'r, 'o, D: Destination> {
+struct Restorer<'r, 'o, D: Destination + 'static> {
     repo: &'r Repository<D>,
     options: &'o RestoreOptions<'o>,
     report: RestoreReport,
@@ -105,7 +105,7 @@ struct Restorer<'r, 'o, D: Destination> {
     groups: Vec<u32>,
 }
 
-impl<D: Destination> Restorer<'_, '_, D> {
+impl<D: Destination + 'static> Restorer<'_, '_, D> {
     fn check_cancel(&self) -> Result<()> {
         match self.options.cancel {
             Some(flag) if flag.load(Ordering::Relaxed) => Err(Error::Aborted),
@@ -267,7 +267,7 @@ impl<D: Destination> Restorer<'_, '_, D> {
 
 /// Restores `entries` (a folder's listing, or part of it) into `target`,
 /// which must be an existing folder.
-pub fn restore<D: Destination>(
+pub fn restore<D: Destination + 'static>(
     repo: &Repository<D>,
     entries: &[Entry],
     target: &Path,
@@ -286,7 +286,7 @@ pub fn restore<D: Destination>(
 }
 
 /// Finds an entry by its path of names below a tree.
-pub fn find<D: Destination>(repo: &Repository<D>, tree: &str, path: &[&[u8]]) -> Result<Option<Entry>> {
+pub fn find<D: Destination + 'static>(repo: &Repository<D>, tree: &str, path: &[&[u8]]) -> Result<Option<Entry>> {
     let Some((first, rest)) = path.split_first() else { return Ok(None) };
     let Some(entry) = repo.load_tree(tree)?.into_iter().find(|e| e.name == *first) else { return Ok(None) };
     match (&entry.kind, rest.is_empty()) {

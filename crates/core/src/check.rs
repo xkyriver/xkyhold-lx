@@ -35,7 +35,7 @@ impl CheckReport {
 /// (from the destination, or computed when it has none and `full` is set)
 /// matches its name; every blob a snapshot needs is in the index. With
 /// `full`, every needed blob is also downloaded and verified.
-pub fn check<D: Destination>(
+pub fn check<D: Destination + 'static>(
     repo: &Repository<D>,
     full: bool,
     on_progress: &mut dyn FnMut(usize),

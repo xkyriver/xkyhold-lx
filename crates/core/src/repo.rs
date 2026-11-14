@@ -6,6 +6,10 @@
 //! written last, only after `flush`.
 
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
+use std::sync::mpsc::{Receiver, SyncSender, TryRecvError, sync_channel};
+use std::sync::{Arc, Mutex};
+use std::thread::JoinHandle;
 
 use serde::{Deserialize, Serialize};
 
@@ -15,7 +19,7 @@ use crate::crypto::{
     random_id, unlock,
 };
 use crate::destination::{Destination, Dir};
-use crate::pack::{BlobEntry, BlobType, PACK_TARGET_SIZE, PackWriter, read_blob};
+use crate::pack::{BlobEntry, BlobType, FinishedPack, PACK_TARGET_SIZE, PackWriter, read_blob};
 use crate::snapshot::{Snapshot, V1_AAD_PREFIX, V2_AAD_PREFIX};
 use crate::tree::{Entry, decode_tree, encode_tree};
 use crate::{Error, Result};
@@ -52,16 +56,68 @@ pub struct Options {
     pub pack_size: usize,
     /// Write an index file after this many packs (the backup checkpoint).
     pub index_every: usize,
+    /// How many packs may be uploading at once.
+    pub uploads: usize,
+    /// A local folder for copies of the (encrypted) index files, so that
+    /// opening a repository downloads only the new ones. One sub-folder per
+    /// repository id. `$XDG_CACHE_HOME/xkyhold-lx` in the app.
+    pub cache: Option<PathBuf>,
 }
 
 impl Default for Options {
     fn default() -> Self {
-        Self { pack_size: PACK_TARGET_SIZE, index_every: 8 }
+        Self { pack_size: PACK_TARGET_SIZE, index_every: 8, uploads: 3, cache: None }
     }
 }
 
-pub struct Repository<D: Destination> {
-    pub dest: D,
+/// What a finished upload reports back.
+type Uploaded = Result<(String, Vec<BlobEntry>, u64)>;
+
+/// Upload threads: packs go out while the backup keeps reading.
+struct Uploader {
+    tx: Option<SyncSender<FinishedPack>>,
+    results: Receiver<Uploaded>,
+    workers: Vec<JoinHandle<()>>,
+    in_flight: usize,
+}
+
+impl Uploader {
+    fn start<D: Destination + 'static>(dest: Arc<D>, threads: usize) -> Self {
+        let (tx, rx) = sync_channel::<FinishedPack>(0);
+        let (done_tx, results) = std::sync::mpsc::channel::<Uploaded>();
+        let rx = Arc::new(Mutex::new(rx));
+        let workers = (0..threads)
+            .map(|_| {
+                let (rx, done, dest) = (rx.clone(), done_tx.clone(), dest.clone());
+                std::thread::spawn(move || {
+                    loop {
+                        let next = rx.lock().unwrap().recv();
+                        let Ok(pack) = next else { break };
+                        let len = pack.bytes.len() as u64;
+                        let outcome =
+                            dest.put(Dir::Packs, &pack.name, &pack.bytes).map(|()| (pack.name, pack.blobs, len));
+                        if done.send(outcome).is_err() {
+                            break;
+                        }
+                    }
+                })
+            })
+            .collect();
+        Self { tx: Some(tx), results, workers, in_flight: 0 }
+    }
+}
+
+impl Drop for Uploader {
+    fn drop(&mut self) {
+        self.tx.take();
+        for worker in self.workers.drain(..) {
+            let _ = worker.join();
+        }
+    }
+}
+
+pub struct Repository<D: Destination + 'static> {
+    pub dest: Arc<D>,
     pub keys: RepoKeys,
     pub config: RepoConfig,
     options: Options,
@@ -75,12 +131,15 @@ pub struct Repository<D: Destination> {
     unindexed: Vec<IndexPack>,
     /// Bytes of packs uploaded by this instance.
     pub uploaded_bytes: u64,
+    uploader: Option<Uploader>,
+    /// The first upload failure, reported at the next save or flush.
+    upload_error: Option<Error>,
 }
 
-impl<D: Destination> Repository<D> {
+impl<D: Destination + 'static> Repository<D> {
     fn new(dest: D, keys: RepoKeys, config: RepoConfig, options: Options) -> Self {
         Self {
-            dest,
+            dest: Arc::new(dest),
             keys,
             config,
             options,
@@ -90,6 +149,8 @@ impl<D: Destination> Repository<D> {
             pending: HashSet::new(),
             unindexed: Vec::new(),
             uploaded_bytes: 0,
+            uploader: None,
+            upload_error: None,
         }
     }
 
@@ -121,7 +182,20 @@ impl<D: Destination> Repository<D> {
         let config = Self::read_config(&dest)?;
         let keys = unlock(&config, credential)?;
         let mut repo = Self::new(dest, keys, config, options);
-        repo.load_index()?;
+        let loaded = repo.load_index();
+        if matches!(credential, Credential::MasterKey(_)) {
+            // A stored master key is only checked by what it decrypts.
+            let wrong = |r: &Result<()>| matches!(r, Err(Error::Authentication(_)));
+            if wrong(&loaded) {
+                return Err(Error::WrongKey);
+            }
+            if let Some(first) = repo.dest.list(Dir::Snapshots, true)?.first()
+                && wrong(&repo.load_snapshot(&first.name).map(|_| ()))
+            {
+                return Err(Error::WrongKey);
+            }
+        }
+        loaded?;
         Ok(repo)
     }
 
@@ -145,11 +219,45 @@ impl<D: Destination> Repository<D> {
 
     // --- Index ------------------------------------------------------------
 
+    fn cache_dir(&self) -> Option<PathBuf> {
+        self.options.cache.as_ref().map(|c| c.join(&self.config.repo_id).join("index"))
+    }
+
+    /// An index file, from the local cache when it holds a verified copy.
+    fn index_file(&self, name: &str) -> Result<Vec<u8>> {
+        let cache = self.cache_dir();
+        if let Some(cached) = cache.as_ref().and_then(|c| std::fs::read(c.join(name)).ok())
+            && sha256_hex(&cached) == name
+        {
+            return Ok(cached);
+        }
+        let sealed = self.dest.get(Dir::Index, name, None)?;
+        if let Some(dir) = cache {
+            // Best effort: a cache that cannot be written only costs downloads.
+            let _ = std::fs::create_dir_all(&dir).and_then(|()| {
+                let temp = dir.join(format!(".tmp-{}", random_id()));
+                std::fs::write(&temp, &sealed)?;
+                std::fs::rename(&temp, dir.join(name))
+            });
+        }
+        Ok(sealed)
+    }
+
+    fn prune_cache(&self, keep: &[String]) {
+        let Some(dir) = self.cache_dir() else { return };
+        let Ok(items) = std::fs::read_dir(&dir) else { return };
+        for item in items.flatten() {
+            if !keep.iter().any(|k| *k == item.file_name().to_string_lossy()) {
+                let _ = std::fs::remove_file(item.path());
+            }
+        }
+    }
+
     pub fn load_index(&mut self) -> Result<()> {
         let names: Vec<String> = self.dest.list(Dir::Index, true)?.into_iter().map(|o| o.name).collect();
         let mut index = HashMap::new();
         for name in &names {
-            let sealed = self.dest.get(Dir::Index, name, None)?;
+            let sealed = self.index_file(name)?;
             let file: IndexFile = json(&inflate(&self.keys.open(&sealed, INDEX_AAD)?)?, "index")?;
             for pack in file.packs {
                 for entry in pack.blobs {
@@ -158,6 +266,7 @@ impl<D: Destination> Repository<D> {
             }
         }
         self.index = index;
+        self.prune_cache(&names);
         self.index_names = names.into_iter().collect();
         Ok(())
     }
@@ -238,8 +347,16 @@ impl<D: Destination> Repository<D> {
     // --- Blobs ------------------------------------------------------------
 
     /// Stores a blob unless the repository already has it. Returns its id.
+    fn throw_if_upload_failed(&mut self) -> Result<()> {
+        match self.upload_error.take() {
+            Some(err) => Err(err),
+            None => Ok(()),
+        }
+    }
+
     pub fn save_blob(&mut self, kind: BlobType, plaintext: &[u8]) -> Result<String> {
         self.require_writable()?;
+        self.throw_if_upload_failed()?;
         let id = self.keys.blob_id(plaintext);
         if !self.has(&id) {
             self.append(kind, &id, plaintext)?;
@@ -268,30 +385,90 @@ impl<D: Destination> Repository<D> {
         Ok(())
     }
 
+    /// Takes in a finished upload. Only now are its blobs stored.
+    fn uploaded(&mut self, outcome: Uploaded) {
+        match outcome {
+            Ok((name, blobs, len)) => {
+                self.uploaded_bytes += len;
+                for blob in &blobs {
+                    self.index.insert(blob.id.clone(), Located { pack: name.clone(), entry: blob.clone() });
+                    self.pending.remove(&blob.id);
+                }
+                self.unindexed.push(IndexPack { id: name, blobs });
+                if self.unindexed.len() >= self.options.index_every
+                    && let Err(err) = self.write_index()
+                {
+                    self.upload_error.get_or_insert(err);
+                }
+            }
+            Err(err) => {
+                self.upload_error.get_or_insert(err);
+            }
+        }
+    }
+
+    /// Waits for one upload to finish, if any is running.
+    fn wait_one(&mut self) {
+        let Some(up) = self.uploader.as_mut() else { return };
+        if up.in_flight == 0 {
+            return;
+        }
+        let outcome = up.results.recv().unwrap_or(Err(Error::Bug("upload thread stopped")));
+        up.in_flight -= 1;
+        self.uploaded(outcome);
+    }
+
+    /// Takes in uploads that already finished, without waiting.
+    fn collect_finished(&mut self) {
+        while let Some(up) = self.uploader.as_mut() {
+            match up.results.try_recv() {
+                Ok(outcome) => {
+                    up.in_flight -= 1;
+                    self.uploaded(outcome);
+                }
+                Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
+            }
+        }
+    }
+
     fn close_pack(&mut self, kind: BlobType) -> Result<()> {
         let Some(writer) = self.writers.remove(&kind) else { return Ok(()) };
         if writer.count() == 0 {
             return Ok(());
         }
         let pack = writer.finish(&self.keys);
-        self.dest.put(Dir::Packs, &pack.name, &pack.bytes)?;
-        // Only now are these blobs stored.
-        self.uploaded_bytes += pack.bytes.len() as u64;
-        for blob in &pack.blobs {
-            self.index.insert(blob.id.clone(), Located { pack: pack.name.clone(), entry: blob.clone() });
-            self.pending.remove(&blob.id);
+        if self.options.uploads <= 1 {
+            let len = pack.bytes.len() as u64;
+            let outcome = self.dest.put(Dir::Packs, &pack.name, &pack.bytes).map(|()| (pack.name, pack.blobs, len));
+            self.uploaded(outcome);
+            return self.throw_if_upload_failed();
         }
-        self.unindexed.push(IndexPack { id: pack.name, blobs: pack.blobs });
-        if self.unindexed.len() >= self.options.index_every {
-            self.write_index()?;
+        if self.uploader.is_none() {
+            self.uploader = Some(Uploader::start(self.dest.clone(), self.options.uploads));
         }
+        self.collect_finished();
+        while self.uploader.as_ref().is_some_and(|u| u.in_flight >= self.options.uploads) {
+            self.wait_one();
+        }
+        self.throw_if_upload_failed()?;
+        let up = self.uploader.as_mut().expect("started above");
+        up.tx.as_ref().expect("open").send(pack).map_err(|_| Error::Bug("upload thread stopped"))?;
+        up.in_flight += 1;
         Ok(())
     }
 
-    /// Uploads every open pack and writes the index.
+    fn wait_all(&mut self) {
+        while self.uploader.as_ref().is_some_and(|u| u.in_flight > 0) {
+            self.wait_one();
+        }
+    }
+
+    /// Uploads every open pack, waits for all uploads, and writes the index.
     pub fn flush(&mut self) -> Result<()> {
         self.close_pack(BlobType::Data)?;
         self.close_pack(BlobType::Tree)?;
+        self.wait_all();
+        self.throw_if_upload_failed()?;
         self.write_index()
     }
 
@@ -299,7 +476,9 @@ impl<D: Destination> Repository<D> {
     /// a backup fails, or `has` would claim data that is not there.
     pub fn abandon(&mut self) {
         self.writers.clear();
+        self.wait_all();
         self.pending.clear();
+        self.upload_error = None;
     }
 
     pub fn load_blob(&self, kind: BlobType, id: &str) -> Result<Vec<u8>> {

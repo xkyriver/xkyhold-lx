@@ -71,7 +71,7 @@ fn credential() -> Credential {
 }
 
 fn small() -> Options {
-    Options { pack_size: 2048, index_every: 2 }
+    Options { pack_size: 2048, index_every: 2, ..Options::default() }
 }
 
 fn noise(len: usize, seed: u32) -> Vec<u8> {
@@ -153,4 +153,71 @@ fn prune_gives_way_to_a_running_backup() {
     let _backup = Lock::acquire_at(dest.clone(), LockKind::Backup, "other", xkyhold_core::time::now_ms, None).unwrap();
     let err = Lock::acquire_at(dest, LockKind::Prune, "me", xkyhold_core::time::now_ms, None).err().unwrap();
     assert_eq!(err.kind(), "busy");
+}
+
+#[test]
+fn a_failed_upload_fails_the_backup_and_the_next_one_completes() {
+    let home = tempfile::tempdir().unwrap();
+    for i in 0..8 {
+        std::fs::write(home.path().join(format!("f{i}")), noise(1500, i + 10)).unwrap();
+    }
+    for step in [1, 3, 5] {
+        let dest = Arc::new(Flaky::default());
+        let (mut repo, _) =
+            Repository::create(dest.clone(), "pw", FAST, "2026-11-14T00:00:00.000Z".into(), small()).unwrap();
+        dest.arm(step);
+        assert!(backup(&mut repo, home.path(), options("2026-11-14T01:00:00.000Z"), &mut |_| {}).is_err());
+        dest.arm(0);
+        let snap = backup(&mut repo, home.path(), options("2026-11-14T02:00:00.000Z"), &mut |_| {}).unwrap();
+        assert_eq!(snap.stats.files, 8);
+        assert_restorable(&dest);
+    }
+}
+
+#[test]
+fn the_index_cache_saves_downloads_and_ignores_a_bad_copy() {
+    #[derive(Default)]
+    struct Counting {
+        inner: MemoryDestination,
+        index_gets: AtomicUsize,
+    }
+    impl Destination for Counting {
+        fn put(&self, d: Dir, n: &str, data: &[u8]) -> Result<()> {
+            self.inner.put(d, n, data)
+        }
+        fn get(&self, d: Dir, n: &str, r: Option<(u64, u64)>) -> Result<Vec<u8>> {
+            if d == Dir::Index {
+                self.index_gets.fetch_add(1, Ordering::SeqCst);
+            }
+            self.inner.get(d, n, r)
+        }
+        fn list(&self, d: Dir, f: bool) -> Result<Vec<StoredObject>> {
+            self.inner.list(d, f)
+        }
+        fn trash(&self, d: Dir, n: &str) -> Result<()> {
+            self.inner.trash(d, n)
+        }
+    }
+    let home = tempfile::tempdir().unwrap();
+    std::fs::write(home.path().join("a"), noise(5000, 1)).unwrap();
+    let cache = tempfile::tempdir().unwrap();
+    let with_cache = || Options { cache: Some(cache.path().to_path_buf()), ..small() };
+    let dest = Arc::new(Counting::default());
+    let (mut repo, _) =
+        Repository::create(dest.clone(), "pw", FAST, "2026-11-14T00:00:00.000Z".into(), with_cache()).unwrap();
+    backup(&mut repo, home.path(), options("2026-11-14T01:00:00.000Z"), &mut |_| {}).unwrap();
+    let files = dest.list(Dir::Index, true).unwrap().len();
+    assert!(files > 0);
+
+    Repository::open(dest.clone(), &credential(), with_cache()).unwrap();
+    assert_eq!(dest.index_gets.load(Ordering::SeqCst), files, "first open downloads every index file");
+    Repository::open(dest.clone(), &credential(), with_cache()).unwrap();
+    assert_eq!(dest.index_gets.load(Ordering::SeqCst), files, "second open reads the cache");
+
+    // A damaged cached copy is noticed by its name and fetched again.
+    let id = repo.config.repo_id.clone();
+    let one = std::fs::read_dir(cache.path().join(&id).join("index")).unwrap().next().unwrap().unwrap().path();
+    std::fs::write(&one, b"garbage").unwrap();
+    Repository::open(dest.clone(), &credential(), with_cache()).unwrap();
+    assert_eq!(dest.index_gets.load(Ordering::SeqCst), files + 1);
 }

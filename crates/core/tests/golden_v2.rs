@@ -163,7 +163,7 @@ fn generate() {
 
     let dest = MemoryDestination::default();
     let fast = Argon2Params { memory_kib: 1024, iterations: 2, parallelism: 1 };
-    let options = Options { pack_size: 4096, index_every: 2 };
+    let options = Options { pack_size: 4096, index_every: 2, ..Options::default() };
     let (mut repo, recovery) =
         Repository::create(dest, PASSWORD, fast, "2026-11-14T12:00:00.000Z".into(), options).unwrap();
     let mut o = BackupOptions::new("golden".into(), "2026-11-14T12:00:00.000Z".into());

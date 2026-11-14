@@ -174,7 +174,7 @@ fn fixture() -> Fixture {
 }
 
 fn new_repo() -> Repository<MemoryDestination> {
-    let options = Options { pack_size: 4096, index_every: 2 };
+    let options = Options { pack_size: 4096, index_every: 2, ..Options::default() };
     Repository::create(MemoryDestination::default(), "pw", FAST, "2026-11-14T00:00:00Z".into(), options).unwrap().0
 }
 
@@ -350,4 +350,19 @@ fn a_version_1_repository_is_read_only() {
     let f = fixture();
     let err = backup(&mut repo, &f.home, options("t", None, &f.home), &mut |_| {}).unwrap_err();
     assert_eq!(err.kind(), "read-only");
+}
+
+#[test]
+fn a_stored_master_key_opens_and_a_wrong_one_is_refused() {
+    let f = fixture();
+    build_home(&f.home);
+    let dest = std::sync::Arc::new(MemoryDestination::default());
+    let (mut repo, _) =
+        Repository::create(dest.clone(), "pw", FAST, "2026-11-14T00:00:00Z".into(), Options::default()).unwrap();
+    backup(&mut repo, &f.home, options("t", None, &f.home.join("Disk")), &mut |_| {}).unwrap();
+    let master = Zeroizing::new(repo.keys.master_key().to_vec());
+    let again = Repository::open(dest.clone(), &Credential::MasterKey(master), Options::default()).unwrap();
+    assert_eq!(again.list_snapshots().unwrap().len(), 1);
+    let wrong = Credential::MasterKey(Zeroizing::new(vec![7u8; 32]));
+    assert_eq!(Repository::open(dest, &wrong, Options::default()).err().map(|e| e.kind()), Some("wrong-key"));
 }

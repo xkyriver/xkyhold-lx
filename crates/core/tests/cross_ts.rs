@@ -37,7 +37,7 @@ fn rust_writes() {
     }
     symlink("Documents/a.txt", home.join("link")).unwrap();
     let fast = Argon2Params { memory_kib: 1024, iterations: 1, parallelism: 1 };
-    let options = Options { pack_size: 4096, index_every: 2 };
+    let options = Options { pack_size: 4096, index_every: 2, ..Options::default() };
     let (mut repo, _) =
         Repository::create(MemoryDestination::default(), "pw", fast, "2026-11-14T00:00:00.000Z".into(), options)
             .unwrap();
