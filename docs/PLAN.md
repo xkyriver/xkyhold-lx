@@ -1,6 +1,6 @@
 # XkyHold-lx — plano base
 
-Data: 13/11/2026 · Estado: **Fases 0 a 3 concluídas (motor, CLI e Google Drive, 14/11/2026); Fase 4 (interface) a seguir**
+Data: 13/11/2026 · Estado: **Fases 0 a 4 concluídas (motor, CLI, Google Drive e janela, 14/11/2026); Fase 5 (cópia automática) a seguir**
 
 A XkyHold-lx é a app de Linux da família XkyHold. Faz cópias de segurança cifradas da pasta pessoal (`$HOME`) inteira, ou de partes dela, incluindo ficheiros ocultos, configurações, chaves, permissões e ligações simbólicas. Existe para resolver o que a XkyHold web não consegue por correr num browser. Segue o mesmo desenho e partilha o formato de repositório.
 
@@ -255,6 +255,31 @@ Critério da fase:
 Problemas encontrados nos testes reais e corrigidos: (1) a biblioteca HTTP tratava o `308 Resume Incomplete` do Drive como um redirecionamento (`cf0f51c`; o Drive falso não passava pela biblioteca real); (2) envios em paralelo podiam criar duas pastas `packs` e dividir os packs entre elas (`c2861dd`; apanhado por um teste que falhava de vez em quando). A cópia longa correu com o binário anterior a (2); a verificação e o restauro com o binário novo encontram tudo. (3) Restauro e verificação lentos (cerca de 1 MB/s): passaram a ir em paralelo.
 
 Não testado: renovação depois de suspender o computador a meio, quota da Drive API em volume (questão 5: nenhum erro 429 nestes testes, mas nada foi medido a sério), contas Workspace, Secret Service ausente ou bloqueado (o caminho existe: a app pede a palavra-passe), KWallet. Ficam no Drive do proprietário as pastas de teste `XkyHold-lx test probe`, `XkyHold-lx test 1` e `XkyHold-lx test 2` (cerca de 2 GB), para ele apagar quando quiser.
+
+### Fase 4 (14/11/2026)
+
+**Concluída a 14/11/2026.** Janela Tauri com o assistente, Início, Restaurar e Definições (secção 4.7), em inglês e pt-PT, tema claro e escuro.
+
+- **Arranque em NVIDIA (decisão do proprietário, 14/11/2026):** com o driver NVIDIA carregado e sem `WEBKIT_DISABLE_DMABUF_RENDERER` definido, o programa substitui-se a si próprio (`exec`) com a variável a 1. É Rust seguro, sem exceção à regra do `unsafe`, mantém o PID e o nome do processo, e funciona a partir do terminal, de um lançador ou de um AppImage. Um valor já definido prevalece (`=0` desliga). Consultada a sessão sénior (Fable 5.2), que confirmou a opção e propôs a condição NVIDIA em vez de Wayland. Visto: mesmo PID, variável presente, janela aberta.
+- **Crate nova `crates/app`** (`xkyhold-app`), partilhada pela janela e pelo CLI: `config.toml` (destino, o que guardar, lembrete, retenção, língua, tema, última cópia), alterado sempre sob um único lock; abertura com o keyring ou com a palavra-passe; cópia com retenção; listagem de pastas e espaço de cada sugestão. O CLI sem `--repo`/`--drive` usa a cópia configurada neste computador, com as escolhas e a retenção (necessário para o temporizador da Fase 5).
+- **Comandos Tauri finos** sobre essa crate; os erros chegam à interface como `kind` e o texto em bruto vai para `$XDG_STATE_HOME/xkyhold-lx/xkyhold-lx.log`. Cópia, restauro e verificação correm numa thread e informam por eventos.
+- **Assistente:** Google Drive ou pasta/disco; deteta cópias existentes (no Drive pela lista, numa pasta pelo `config`) e encurta para a palavra-passe ou a chave de recuperação; ao voltar a ligar, recupera a última cópia deste computador e as escolhas do que guardar a partir das regras `leftOut` dessa cópia. Passo 5: só o lembrete; a cópia automática entra na Fase 5.
+- **O que guardar:** pasta pessoal inteira ou só algumas pastas, árvore para deixar de fora, sugestões com o espaço que ocupam (contado em segundo plano), aviso de pastas de nuvem (Dropbox, etc.), outros discos montados dentro da home, padrões.
+- **Restaurar:** datas, navegação, pasta nova `~/XkyHold-restore/<data local>/` por omissão, ou o sítio original; aí mostra o que já existe e o utilizador escolhe manter os dois, saltar ou substituir.
+- **Definições:** o que guardar, lembrete, retenção, verificar (rápida e completa, com Parar), destino e conta, palavra-passe e "abrir sem palavra-passe" (keyring), língua e tema, remover deste computador.
+- Fechar a janela durante um trabalho pergunta primeiro. Um script (`ui/scripts/check-i18n.mjs`, corre no `npm run check`) falha se algum texto não tiver tradução pt-PT. Só nas compilações de desenvolvimento: `XKYHOLD_LX_PROBE` deixa um script conduzir a janela (foi assim que o agente a testou).
+
+Critério da fase:
+
+| Critério | Resultado |
+|---|---|
+| Fluxo completo pela janela, com pasta local | **Visto pelo agente** (capturas e leitura do DOM), numa home temporária: assistente até à chave de recuperação, cópia, restauro para pasta nova e para o sítio original com conflito ("manter os dois"), verificação rápida e completa, alterar palavra-passe, desligar o keyring e abrir com a palavra-passe (e com a errada: mensagem certa), remover deste computador e voltar a ligar com a chave de recuperação, pt-PT e tema claro |
+| Fluxo completo pela janela, com o Drive | **Visto pelo agente**, com o **login Google feito pelo proprietário a partir da janela**: lista das cópias do Drive, criação de `XkyHold-lx test 3`, cópia, restauro de 2,2 MB com SHA-256 iguais, verificação completa, ligar outra vez a uma cópia existente. Fechar durante uma cópia pergunta; "Parar e fechar" fecha em cerca de 5 s. Uma cópia parada a meio e a janela fechada e reaberta: a seguinte enviou 40 MB de um ficheiro de 80 MB |
+| Testado automaticamente | 53 testes (mais 9 que na Fase 3), incluindo a cópia parada continuada pela seguinte (falha sem a correção) e o CLI com a cópia configurada; verificação de traduções |
+
+Problemas encontrados pela janela e corrigidos: (1) gravações das definições em paralelo perdiam uma delas; (2) uma cópia parada só registava os packs no índice de 8 em 8, e reenviava até cerca de 128 MB; agora regista os que terminaram; (3) os dados do web view da própria app (`~/.local/share/com.xkyriver.xkyhold-lx`) entravam na cópia: passaram para a regra fixa `app-state` (o formato não muda: as regras gravadas na cópia dizem os padrões usados); (4) "manter os dois" chamava `notes.txt (restored)` e perdia a extensão: agora `notes (restored).txt`; (5) a pasta de restauro tinha a hora em UTC; (6) uma pasta com uma cópia ainda sem nenhuma cópia feita não era reconhecida; (7) a verificação não se podia parar; (8) "enviados" somava as cópias anteriores da mesma sessão.
+
+Não testado: sessão Google a expirar a meio pela janela (o caminho existe: faixa com "Entrar de novo"); abrir na janela uma cópia v1 feita pela XkyHold web (só pelo CLI e pelos testes); disco montado dentro da home (sem um nesta máquina de teste); "Imprimir" da chave de recuperação; leitores de ecrã; empacotamento (Fase 7). Nota do teste: o `xdg-open` herda a `HOME` da janela, e o Chromium criou um perfil novo na home temporária; numa home real isto não acontece. Fica no Drive do proprietário a pasta de teste `XkyHold-lx test 3` (cerca de 370 MB).
 
 ## 8. Questões em aberto
 
