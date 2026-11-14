@@ -1,12 +1,17 @@
 //! Check (FORMAT.md 10.5).
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::mpsc;
 
 use crate::bytes::sha256_hex;
 use crate::destination::{Destination, Dir};
 use crate::prune::reachable;
 use crate::repo::Repository;
 use crate::{Error, Result};
+
+/// How many blobs a full check downloads at the same time.
+const CHECK_THREADS: usize = 6;
 
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct CheckReport {
@@ -65,21 +70,54 @@ pub fn check<D: Destination + 'static>(
         }
         Err(e) => return Err(e),
     };
-    for id in &live {
-        let Some((_, entry)) = repo.locate(id) else {
-            report.missing_blobs += 1;
-            continue;
-        };
-        if full {
-            match repo.load_blob(entry.kind, id) {
-                Ok(_) => {}
-                Err(Error::MissingBlob(_)) => report.missing_blobs += 1,
-                Err(Error::Authentication(_) | Error::Format(_)) => report.damaged_blobs += 1,
-                Err(e) => return Err(e),
-            }
+    let ids: Vec<&String> = live.iter().collect();
+    let mut located = Vec::new();
+    for id in ids {
+        match repo.locate(id) {
+            Some((_, entry)) => located.push((id.as_str(), entry.kind)),
+            None => report.missing_blobs += 1,
         }
-        report.blobs_checked += 1;
+    }
+    if !full {
+        report.blobs_checked = located.len();
         on_progress(report.blobs_checked);
+    } else {
+        // Download and verify several blobs at a time.
+        let next = AtomicUsize::new(0);
+        let (tx, rx) = mpsc::channel::<Result<()>>();
+        let mut fatal = None;
+        std::thread::scope(|scope| {
+            for _ in 0..CHECK_THREADS {
+                let (tx, next, located) = (tx.clone(), &next, &located);
+                scope.spawn(move || {
+                    loop {
+                        let i = next.fetch_add(1, Ordering::SeqCst);
+                        let Some((id, kind)) = located.get(i) else { break };
+                        if tx.send(repo.load_blob(*kind, id).map(|_| ())).is_err() {
+                            break;
+                        }
+                    }
+                });
+            }
+            drop(tx);
+            for outcome in rx {
+                match outcome {
+                    Ok(()) => {}
+                    Err(Error::MissingBlob(_)) => report.missing_blobs += 1,
+                    Err(Error::Authentication(_) | Error::Format(_)) => report.damaged_blobs += 1,
+                    Err(e) => {
+                        // Stop the others: the network or the destination failed.
+                        next.store(usize::MAX / 2, Ordering::SeqCst);
+                        fatal.get_or_insert(e);
+                    }
+                }
+                report.blobs_checked += 1;
+                on_progress(report.blobs_checked);
+            }
+        });
+        if let Some(e) = fatal {
+            return Err(e);
+        }
     }
     report.missing_packs.sort();
     report.damaged_packs.sort();

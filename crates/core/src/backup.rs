@@ -492,6 +492,11 @@ impl<D: Destination + 'static> Walker<'_, '_, D> {
             }
             content.push(self.repo.save_blob(BlobType::Data, &chunk[..filled])?);
             total += filled as u64;
+            // Shown, so a large file does not look stuck; counted once done.
+            let done = self.progress.bytes;
+            self.progress.bytes += total;
+            self.report();
+            self.progress.bytes = done;
             if filled < chunk.len() {
                 break;
             }

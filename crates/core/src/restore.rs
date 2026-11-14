@@ -11,7 +11,8 @@ use std::ffi::CString;
 use std::io::Write;
 use std::os::fd::{AsFd, OwnedFd};
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::mpsc;
 
 use rustix::fs::{
     AtFlags, FileType, Gid, Mode, OFlags, Timespec, Timestamps, XattrFlags, chownat, fchmod, fsetxattr, futimens,
@@ -80,6 +81,67 @@ fn timestamps(meta: &Meta) -> Option<Timestamps> {
         tv_nsec: ns.rem_euclid(1_000_000_000) as _,
     };
     Some(Timestamps { last_access: ts, last_modification: ts })
+}
+
+/// How many files of one folder are restored at the same time.
+const FILE_THREADS: usize = 6;
+
+/// Applies permissions, group, extended attributes and times. Returns how
+/// many extended attributes the target refused.
+fn apply_meta(fd: &OwnedFd, meta: &Meta, default_mode: u32, groups: &[u32]) -> Result<u64> {
+    let mode = meta.mode.unwrap_or(default_mode) & 0o1777;
+    fchmod(fd, Mode::from_raw_mode(mode)).map_err(errno)?;
+    if let Some(gid) = group_to_apply(meta, groups) {
+        // Owner stays; only the group changes.
+        let _ = rustix::fs::fchown(fd, None, Some(Gid::from_raw(gid)));
+    }
+    let mut failures = 0;
+    for attr in meta.xattrs.iter().flatten() {
+        let ok = from_base64(&attr.value)
+            .ok()
+            .is_some_and(|value| fsetxattr(fd, attr.name.as_str(), &value, XattrFlags::empty()).is_ok());
+        if !ok {
+            failures += 1;
+        }
+    }
+    if let Some(times) = timestamps(meta) {
+        futimens(fd, &times).map_err(errno)?;
+    }
+    Ok(failures)
+}
+
+/// Writes one file under a temporary name, applies its metadata and
+/// renames it into place. Returns the extended attributes refused.
+#[allow(clippy::too_many_arguments)]
+fn write_file<D: Destination + 'static>(
+    repo: &Repository<D>,
+    dir: &OwnedFd,
+    name: &[u8],
+    entry: &Entry,
+    content: &[String],
+    groups: &[u32],
+    cancelled: &dyn Fn() -> Result<()>,
+    sent: &dyn Fn(u64),
+) -> Result<u64> {
+    let temp = format!(".xkyhold-{}.tmp", random_id()).into_bytes();
+    let flags = OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+    let fd = openat(dir, cname(&temp).as_c_str(), flags, Mode::from_raw_mode(0o600)).map_err(errno)?;
+    let written = (|| {
+        let mut file = std::fs::File::from(fd.try_clone()?);
+        for id in content {
+            cancelled()?;
+            let chunk = repo.load_blob(BlobType::Data, id)?;
+            file.write_all(&chunk)?;
+            sent(chunk.len() as u64);
+        }
+        let failures = apply_meta(&fd, &entry.meta, 0o644, groups)?;
+        renameat(dir, cname(&temp).as_c_str(), dir, cname(name).as_c_str()).map_err(errno)?;
+        Ok(failures)
+    })();
+    if written.is_err() {
+        let _ = unlinkat(dir, cname(&temp).as_c_str(), AtFlags::empty());
+    }
+    written
 }
 
 /// The groups the restoring user belongs to.
@@ -151,51 +213,75 @@ impl<D: Destination + 'static> Restorer<'_, '_, D> {
     }
 
     fn apply_meta(&mut self, fd: &OwnedFd, meta: &Meta, default_mode: u32) -> Result<()> {
-        let mode = meta.mode.unwrap_or(default_mode) & 0o1777;
-        fchmod(fd, Mode::from_raw_mode(mode)).map_err(errno)?;
-        if let Some(gid) = group_to_apply(meta, &self.groups) {
-            // Owner stays; only the group changes.
-            let _ = rustix::fs::fchown(fd, None, Some(Gid::from_raw(gid)));
-        }
-        for attr in meta.xattrs.iter().flatten() {
-            let ok = from_base64(&attr.value)
-                .ok()
-                .is_some_and(|value| fsetxattr(fd, attr.name.as_str(), &value, XattrFlags::empty()).is_ok());
-            if !ok {
-                self.report.xattr_failures += 1;
-            }
-        }
-        if let Some(times) = timestamps(meta) {
-            futimens(fd, &times).map_err(errno)?;
-        }
+        self.report.xattr_failures += apply_meta(fd, meta, default_mode, &self.groups)?;
         Ok(())
     }
 
-    fn restore_file(&mut self, dir: &OwnedFd, entry: &Entry, content: &[String], path: &str) -> Result<()> {
-        let Some((name, _)) = self.place(dir, &entry.name, false)? else { return Ok(()) };
-        let temp = format!(".xkyhold-{}.tmp", random_id()).into_bytes();
-        let flags = OFlags::WRONLY | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC;
-        let fd = openat(dir, cname(&temp).as_c_str(), flags, Mode::from_raw_mode(0o600)).map_err(errno)?;
-        let written = (|| {
-            let mut file = std::fs::File::from(fd.try_clone()?);
-            for id in content {
-                self.check_cancel()?;
-                let chunk = self.repo.load_blob(BlobType::Data, id)?;
-                file.write_all(&chunk)?;
-                self.report.bytes += chunk.len() as u64;
+    /// Restores the files of one folder, several at a time. Names are
+    /// decided first, in order, so "keep both" never picks one name twice.
+    fn restore_files(&mut self, dir: &OwnedFd, files: &[(&Entry, &[String], String)]) -> Result<()> {
+        let mut jobs = Vec::new();
+        for (entry, content, path) in files {
+            if let Some((name, _)) = self.place(dir, &entry.name, false)? {
+                jobs.push((name, *entry, *content, path.as_str()));
+            }
+        }
+        enum Event {
+            Bytes(u64),
+            Done(String, Result<u64>),
+        }
+        let (repo, groups, user_cancel) = (self.repo, self.groups.clone(), self.options.cancel);
+        let next = AtomicUsize::new(0);
+        let stop = AtomicBool::new(false);
+        let (tx, rx) = mpsc::channel::<Event>();
+        let mut failure: Option<Error> = None;
+        std::thread::scope(|scope| {
+            for _ in 0..FILE_THREADS.min(jobs.len()) {
+                let (tx, jobs, next, stop, groups) = (tx.clone(), &jobs, &next, &stop, &groups);
+                scope.spawn(move || {
+                    loop {
+                        let i = next.fetch_add(1, Ordering::SeqCst);
+                        if i >= jobs.len() || stop.load(Ordering::SeqCst) {
+                            break;
+                        }
+                        let (name, entry, content, path) = &jobs[i];
+                        let cancelled = || {
+                            if stop.load(Ordering::SeqCst) || user_cancel.is_some_and(|c| c.load(Ordering::Relaxed)) {
+                                Err(Error::Aborted)
+                            } else {
+                                Ok(())
+                            }
+                        };
+                        let result = write_file(repo, dir, name, entry, content, groups, &cancelled, &|n| {
+                            let _ = tx.send(Event::Bytes(n));
+                        });
+                        let _ = tx.send(Event::Done((*path).to_owned(), result));
+                    }
+                });
+            }
+            drop(tx);
+            for event in rx {
+                match event {
+                    Event::Bytes(n) => self.report.bytes += n,
+                    Event::Done(path, Ok(xattr_failures)) => {
+                        self.report.files += 1;
+                        self.report.xattr_failures += xattr_failures;
+                        self.report.current = path;
+                    }
+                    Event::Done(_, Err(err)) => {
+                        stop.store(true, Ordering::SeqCst);
+                        if failure.is_none() || matches!(failure, Some(Error::Aborted)) {
+                            failure = Some(err);
+                        }
+                    }
+                }
                 (self.on_progress)(&self.report);
             }
-            self.apply_meta(&fd, &entry.meta, 0o644)?;
-            renameat(dir, cname(&temp).as_c_str(), dir, cname(&name).as_c_str()).map_err(errno)
-        })();
-        if written.is_err() {
-            let _ = unlinkat(dir, cname(&temp).as_c_str(), AtFlags::empty());
+        });
+        match failure {
+            Some(err) => Err(err),
+            None => Ok(()),
         }
-        written?;
-        self.report.files += 1;
-        self.report.current = path.to_owned();
-        (self.on_progress)(&self.report);
-        Ok(())
     }
 
     fn restore_symlink(&mut self, dir: &OwnedFd, entry: &Entry, target: &[u8]) -> Result<()> {
@@ -242,15 +328,25 @@ impl<D: Destination + 'static> Restorer<'_, '_, D> {
     }
 
     fn restore_entries(&mut self, dir: &OwnedFd, entries: &[Entry], path: &str) -> Result<()> {
+        let child = |entry: &Entry| format!("{path}{}{}", if path.is_empty() { "" } else { "/" }, entry.display_name());
+        let files: Vec<(&Entry, &[String], String)> = entries
+            .iter()
+            .filter(|e| valid_name(&e.name))
+            .filter_map(|e| match &e.kind {
+                EntryKind::File { content, .. } => Some((e, content.as_slice(), child(e))),
+                _ => None,
+            })
+            .collect();
+        self.restore_files(dir, &files)?;
         for entry in entries {
             self.check_cancel()?;
             if !valid_name(&entry.name) {
                 self.report.bad_names += 1;
                 continue;
             }
-            let child = format!("{path}{}{}", if path.is_empty() { "" } else { "/" }, entry.display_name());
+            let child = child(entry);
             match &entry.kind {
-                EntryKind::File { content, .. } => self.restore_file(dir, entry, content, &child)?,
+                EntryKind::File { .. } => {}
                 EntryKind::Dir { subtree, mount } => {
                     if *mount {
                         self.report.mounts += 1;
@@ -259,6 +355,9 @@ impl<D: Destination + 'static> Restorer<'_, '_, D> {
                 }
                 EntryKind::Symlink { target } => self.restore_symlink(dir, entry, target)?,
                 EntryKind::Unknown(_) => self.report.unknown += 1,
+            }
+            if !matches!(entry.kind, EntryKind::File { .. }) {
+                (self.on_progress)(&self.report);
             }
         }
         Ok(())

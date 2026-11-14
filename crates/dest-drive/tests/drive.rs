@@ -201,3 +201,44 @@ fn uploads_keep_under_the_limit() {
     dest.put(Dir::Packs, "b", &noise(1_000_000, 2)).unwrap();
     assert!(started.elapsed().as_millis() >= 950, "{:?}", started.elapsed());
 }
+
+#[test]
+fn upload_threads_starting_together_make_one_packs_folder() {
+    let fake = Arc::new(FakeDrive::default());
+    let dest = Arc::new(folder(&fake, "XkyHold-lx test"));
+    std::thread::scope(|s| {
+        for i in 0..6 {
+            let dest = dest.clone();
+            s.spawn(move || dest.put(Dir::Packs, &format!("p{i}"), b"x").unwrap());
+        }
+    });
+    let s = fake.0.lock().unwrap();
+    let repo = s.find_path(&["XkyHold", "XkyHold-lx test"]).unwrap();
+    let packs = s.children(&repo.id).iter().filter(|f| f.name == "packs").count();
+    assert_eq!(packs, 1);
+}
+
+#[test]
+fn files_in_duplicate_folders_are_all_found() {
+    let fake = Arc::new(FakeDrive::default());
+    let dest = folder(&fake, "XkyHold-lx test");
+    dest.put(Dir::Packs, "a", b"1").unwrap();
+    // Another device (or an old version) made a second "packs" folder.
+    {
+        let mut s = fake.0.lock().unwrap();
+        let repo = s.find_path(&["XkyHold", "XkyHold-lx test"]).unwrap().id.clone();
+        let mut dup = s.files.iter().find(|f| f.name == "packs").unwrap().clone();
+        dup.id = "zz-dup".into();
+        dup.parent = repo;
+        s.files.push(dup);
+        let mut b = s.files.iter().find(|f| f.name == "a").unwrap().clone();
+        b.id = "zz-b".into();
+        b.name = "b".into();
+        b.parent = "zz-dup".into();
+        s.files.push(b);
+    }
+    let again = folder(&fake, "XkyHold-lx test");
+    let mut names: Vec<String> = again.list(Dir::Packs, true).unwrap().into_iter().map(|o| o.name).collect();
+    names.sort();
+    assert_eq!(names, ["a", "b"]);
+}

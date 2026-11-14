@@ -33,7 +33,9 @@ const SUBFOLDERS: [Dir; 4] = [Dir::Packs, Dir::Index, Dir::Snapshots, Dir::Locks
 
 #[derive(Default)]
 struct State {
-    folders: HashMap<Dir, String>,
+    /// Every Drive folder for `dir`; the first takes new files. Drive allows
+    /// two folders with one name, so all are read.
+    folders: HashMap<Dir, Vec<String>>,
     /// name -> file, per folder, filled on first use.
     listings: HashMap<Dir, HashMap<String, DriveFile>>,
     /// What this session wrote and trashed. Drive's listings lag behind
@@ -42,13 +44,16 @@ struct State {
     written: HashMap<Dir, HashMap<String, DriveFile>>,
     trashed: HashMap<Dir, HashSet<String>>,
     /// Sub-folders that already exist, from one listing.
-    existing: Option<HashMap<String, String>>,
+    existing: Option<HashMap<String, Vec<String>>>,
 }
 
 pub struct DriveFolder {
     drive: Drive,
     repo_folder: String,
     state: Mutex<State>,
+    /// Held while a sub-folder is looked up or created, so that upload
+    /// threads starting together never create two `packs` folders.
+    creating: Mutex<()>,
 }
 
 impl DriveFolder {
@@ -70,53 +75,65 @@ impl DriveFolder {
         let app = drive.ensure_folder(APP_FOLDER, "root")?;
         let repo_folder = drive.ensure_folder(name, &app)?;
         let mut state = State::default();
-        state.folders.insert(Dir::Root, repo_folder.clone());
-        Ok(Self { drive, repo_folder, state: Mutex::new(state) })
+        state.folders.insert(Dir::Root, vec![repo_folder.clone()]);
+        Ok(Self { drive, repo_folder, state: Mutex::new(state), creating: Mutex::new(()) })
     }
 
     pub fn drive(&self) -> &Drive {
         &self.drive
     }
 
-    fn existing(&self) -> Result<HashMap<String, String>> {
+    fn existing(&self) -> Result<HashMap<String, Vec<String>>> {
         if let Some(e) = &self.state.lock().unwrap().existing {
             return Ok(e.clone());
         }
-        let map: HashMap<String, String> = self
-            .drive
-            .list_children(&self.repo_folder)?
-            .into_iter()
-            .filter(|f| f.mime_type.as_deref() == Some(FOLDER_MIME))
-            .map(|f| (f.name, f.id))
-            .collect();
+        let mut map: HashMap<String, Vec<String>> = HashMap::new();
+        for f in self.drive.list_children(&self.repo_folder)? {
+            if f.mime_type.as_deref() == Some(FOLDER_MIME) {
+                map.entry(f.name).or_default().push(f.id);
+            }
+        }
+        for ids in map.values_mut() {
+            ids.sort();
+        }
         self.state.lock().unwrap().existing = Some(map.clone());
         Ok(map)
     }
 
-    /// The folder id for `dir`, and whether this session just created it.
-    fn folder(&self, dir: Dir) -> Result<(String, bool)> {
-        if let Some(id) = self.state.lock().unwrap().folders.get(&dir) {
-            return Ok((id.clone(), false));
+    /// The folder ids for `dir` (the first takes new files), and whether
+    /// this session just created it.
+    fn folders(&self, dir: Dir) -> Result<(Vec<String>, bool)> {
+        if let Some(ids) = self.state.lock().unwrap().folders.get(&dir) {
+            return Ok((ids.clone(), false));
         }
-        let (id, created) = match self.existing()?.get(dir.as_str()) {
-            Some(id) => (id.clone(), false),
-            None => (self.drive.create_folder(dir.as_str(), &self.repo_folder)?, true),
+        let _one_at_a_time = self.creating.lock().unwrap();
+        if let Some(ids) = self.state.lock().unwrap().folders.get(&dir) {
+            return Ok((ids.clone(), false));
+        }
+        let (ids, created) = match self.existing()?.get(dir.as_str()) {
+            Some(ids) if !ids.is_empty() => (ids.clone(), false),
+            _ => (vec![self.drive.create_folder(dir.as_str(), &self.repo_folder)?], true),
         };
         let mut state = self.state.lock().unwrap();
-        state.folders.insert(dir, id.clone());
+        state.folders.insert(dir, ids.clone());
         if created {
-            state.existing.get_or_insert_with(HashMap::new).insert(dir.as_str().into(), id.clone());
+            state.existing.get_or_insert_with(HashMap::new).insert(dir.as_str().into(), ids.clone());
         }
-        Ok((id, created))
+        Ok((ids, created))
     }
 
     fn listing(&self, dir: Dir, fresh: bool) -> Result<HashMap<String, DriveFile>> {
         if !fresh && let Some(l) = self.state.lock().unwrap().listings.get(&dir) {
             return Ok(l.clone());
         }
-        let (folder, created) = self.folder(dir)?;
+        let (folders, created) = self.folders(dir)?;
         // A folder this session just created is known to be empty.
-        let files = if created { Vec::new() } else { self.drive.list_children(&folder)? };
+        let mut files = Vec::new();
+        if !created {
+            for folder in &folders {
+                files.extend(self.drive.list_children(folder)?);
+            }
+        }
         let mut state = self.state.lock().unwrap();
         let gone = state.trashed.get(&dir).cloned().unwrap_or_default();
         let mut map = HashMap::new();
@@ -162,11 +179,12 @@ impl Destination for DriveFolder {
             }
             return Ok(());
         }
-        let (folder, _) = self.folder(dir)?;
+        let (folders, _) = self.folders(dir)?;
+        let folder = &folders[0];
         let mut file = if data.len() <= SMALL_UPLOAD {
-            self.drive.upload_small(name, &folder, data)?
+            self.drive.upload_small(name, folder, data)?
         } else {
-            self.drive.upload_resumable(name, &folder, data)?
+            self.drive.upload_resumable(name, folder, data)?
         };
         file.size = Some(data.len().to_string());
         self.remember(dir, name, file);

@@ -131,7 +131,9 @@ pub struct Repository<D: Destination + 'static> {
     unindexed: Vec<IndexPack>,
     /// Bytes of packs uploaded by this instance.
     pub uploaded_bytes: u64,
-    uploader: Option<Uploader>,
+    /// In a mutex only so the repository can be shared between restore
+    /// threads; it is used through `&mut self`, never locked in practice.
+    uploader: Mutex<Option<Uploader>>,
     /// The first upload failure, reported at the next save or flush.
     upload_error: Option<Error>,
 }
@@ -149,7 +151,7 @@ impl<D: Destination + 'static> Repository<D> {
             pending: HashSet::new(),
             unindexed: Vec::new(),
             uploaded_bytes: 0,
-            uploader: None,
+            uploader: Mutex::new(None),
             upload_error: None,
         }
     }
@@ -409,7 +411,7 @@ impl<D: Destination + 'static> Repository<D> {
 
     /// Waits for one upload to finish, if any is running.
     fn wait_one(&mut self) {
-        let Some(up) = self.uploader.as_mut() else { return };
+        let Some(up) = self.uploader.get_mut().unwrap().as_mut() else { return };
         if up.in_flight == 0 {
             return;
         }
@@ -420,7 +422,7 @@ impl<D: Destination + 'static> Repository<D> {
 
     /// Takes in uploads that already finished, without waiting.
     fn collect_finished(&mut self) {
-        while let Some(up) = self.uploader.as_mut() {
+        while let Some(up) = self.uploader.get_mut().unwrap().as_mut() {
             match up.results.try_recv() {
                 Ok(outcome) => {
                     up.in_flight -= 1;
@@ -443,22 +445,22 @@ impl<D: Destination + 'static> Repository<D> {
             self.uploaded(outcome);
             return self.throw_if_upload_failed();
         }
-        if self.uploader.is_none() {
-            self.uploader = Some(Uploader::start(self.dest.clone(), self.options.uploads));
+        if self.uploader.get_mut().unwrap().is_none() {
+            *self.uploader.get_mut().unwrap() = Some(Uploader::start(self.dest.clone(), self.options.uploads));
         }
         self.collect_finished();
-        while self.uploader.as_ref().is_some_and(|u| u.in_flight >= self.options.uploads) {
+        while self.uploader.get_mut().unwrap().as_ref().is_some_and(|u| u.in_flight >= self.options.uploads) {
             self.wait_one();
         }
         self.throw_if_upload_failed()?;
-        let up = self.uploader.as_mut().expect("started above");
+        let up = self.uploader.get_mut().unwrap().as_mut().expect("started above");
         up.tx.as_ref().expect("open").send(pack).map_err(|_| Error::Bug("upload thread stopped"))?;
         up.in_flight += 1;
         Ok(())
     }
 
     fn wait_all(&mut self) {
-        while self.uploader.as_ref().is_some_and(|u| u.in_flight > 0) {
+        while self.uploader.get_mut().unwrap().as_ref().is_some_and(|u| u.in_flight > 0) {
             self.wait_one();
         }
     }
@@ -556,5 +558,18 @@ impl<D: Destination + 'static> Repository<D> {
             .collect::<Result<Vec<_>>>()?;
         snapshots.sort_by(|a, b| a.time.cmp(&b.time));
         Ok(snapshots)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::destination::MemoryDestination;
+
+    fn assert_sync<T: Sync>() {}
+
+    #[test]
+    fn a_repository_can_be_shared_between_threads() {
+        assert_sync::<Repository<MemoryDestination>>();
     }
 }

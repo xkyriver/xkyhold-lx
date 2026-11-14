@@ -205,6 +205,14 @@ impl Tokens for RefreshingTokens {
         // Renew a minute early, so no request starts with a token about to die.
         let life = json["expires_in"].as_u64().unwrap_or(3600).saturating_sub(60);
         *current = Some((token.clone(), Instant::now() + Duration::from_secs(life)));
+        if std::env::var_os("XKYHOLD_LX_LOG").is_some() {
+            eprintln!(
+                "[{}] new Google access token ({}), valid for {} s",
+                xkyhold_core::time::now_iso(),
+                if renew { "after a 401" } else { "the previous one was due" },
+                life + 60
+            );
+        }
         Ok(token)
     }
 }
