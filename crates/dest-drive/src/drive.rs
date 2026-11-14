@@ -2,8 +2,8 @@
 //! `src/storage/drive.ts`). Retries rate limits, server errors and dropped
 //! connections; renews the access token once on a 401.
 
-use std::sync::Arc;
-use std::time::Duration;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use serde::Deserialize;
 use serde_json::json;
@@ -51,17 +51,43 @@ fn transient(err: &Error) -> bool {
     matches!(err, Error::Network(_))
 }
 
+/// Keeps uploads under a rate, shared by all upload threads.
+struct Limiter {
+    bytes_per_sec: u64,
+    start: Instant,
+    sent: u64,
+}
+
 pub struct Drive {
     http: Arc<dyn Http>,
     tokens: Arc<dyn Tokens>,
     /// Waits before each retry; shortened in tests.
     pub delays: Vec<Duration>,
+    limiter: Option<Mutex<Limiter>>,
 }
 
 impl Drive {
     pub fn new(http: Arc<dyn Http>, tokens: Arc<dyn Tokens>) -> Self {
         let delays = [1, 3, 8, 20, 45].map(Duration::from_secs).to_vec();
-        Self { http, tokens, delays }
+        Self { http, tokens, delays, limiter: None }
+    }
+
+    /// Limits uploads to about this many bytes per second.
+    pub fn limit_uploads(&mut self, bytes_per_sec: u64) {
+        self.limiter =
+            (bytes_per_sec > 0).then(|| Mutex::new(Limiter { bytes_per_sec, start: Instant::now(), sent: 0 }));
+    }
+
+    /// Waits until sending `n` more bytes keeps under the limit.
+    fn pace(&self, n: usize) {
+        let Some(limiter) = &self.limiter else { return };
+        let wait = {
+            let mut l = limiter.lock().unwrap();
+            l.sent += n as u64;
+            let due = Duration::from_secs_f64(l.sent as f64 / l.bytes_per_sec as f64);
+            due.saturating_sub(l.start.elapsed())
+        };
+        std::thread::sleep(wait);
     }
 
     /// Sends one request with the access token; on a 401, renews the token
@@ -187,6 +213,7 @@ impl Drive {
         .into_bytes();
         body.extend_from_slice(data);
         body.extend_from_slice(format!("\r\n--{boundary}--").as_bytes());
+        self.pace(data.len());
         let res = self.call(&|| {
             Request::new("POST", format!("{UPLOAD_API}/files?uploadType=multipart&fields=id,name,size"))
                 .header("Content-Type", format!("multipart/related; boundary={boundary}"))
@@ -232,6 +259,7 @@ impl Drive {
                 let end = (offset + UPLOAD_CHUNK).min(size);
                 let range =
                     if size == 0 { format!("bytes */{size}") } else { format!("bytes {offset}-{}/{size}", end - 1) };
+                self.pace(end - offset);
                 let res = self
                     .http
                     .send(

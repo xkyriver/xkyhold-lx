@@ -189,3 +189,15 @@ fn listings_page_and_repositories_are_found() {
     folder(&fake, "XkyHold-lx test two");
     assert_eq!(DriveFolder::list_repositories(&drive(&fake)).unwrap(), ["XkyHold-lx test one", "XkyHold-lx test two"]);
 }
+
+#[test]
+fn uploads_keep_under_the_limit() {
+    let fake = Arc::new(FakeDrive::default());
+    let mut d = drive(&fake);
+    d.limit_uploads(2_000_000);
+    let dest = DriveFolder::open(d, "XkyHold-lx test").unwrap();
+    let started = std::time::Instant::now();
+    dest.put(Dir::Packs, "a", &noise(1_000_000, 1)).unwrap();
+    dest.put(Dir::Packs, "b", &noise(1_000_000, 2)).unwrap();
+    assert!(started.elapsed().as_millis() >= 950, "{:?}", started.elapsed());
+}

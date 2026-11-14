@@ -39,6 +39,9 @@ struct Cli {
     /// The backup: the folder XkyHold/<NAME> in your Google Drive (see `login`).
     #[arg(long, global = true, env = "XKYHOLD_LX_DRIVE")]
     drive: Option<String>,
+    /// Upload at most this many kilobytes per second to Google Drive.
+    #[arg(long, global = true, value_name = "KB/s")]
+    limit_upload: Option<u64>,
     /// Open with the recovery key instead of the password.
     #[arg(long, global = true)]
     recovery_key: bool,
@@ -181,6 +184,14 @@ fn client() -> Result<Client> {
     })
 }
 
+fn drive_client_limited(cli: &Cli) -> Result<Drive> {
+    let mut drive = drive_client()?;
+    if let Some(kb) = cli.limit_upload {
+        drive.limit_uploads(kb * 1000);
+    }
+    Ok(drive)
+}
+
 fn drive_client() -> Result<Drive> {
     let account =
         load_settings()?.account.ok_or_else(|| Error::Session("not connected to Google Drive; run `login`".into()))?;
@@ -195,7 +206,7 @@ fn drive_client() -> Result<Drive> {
 
 fn destination(cli: &Cli) -> Result<(Arc<dyn Destination>, Option<PathBuf>)> {
     if let Some(name) = &cli.drive {
-        let folder = DriveFolder::open(drive_client()?, name)?;
+        let folder = DriveFolder::open(drive_client_limited(cli)?, name)?;
         folder.warm()?;
         return Ok((Arc::new(folder), None));
     }
