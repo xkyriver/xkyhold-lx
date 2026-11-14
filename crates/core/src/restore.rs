@@ -85,6 +85,8 @@ fn timestamps(meta: &Meta) -> Option<Timestamps> {
 
 /// How many files of one folder are restored at the same time.
 const FILE_THREADS: usize = 6;
+/// How many chunks of one file are fetched at the same time.
+const CHUNK_WINDOW: usize = 4;
 
 /// Applies permissions, group, extended attributes and times. Returns how
 /// many extended attributes the target refused.
@@ -128,11 +130,19 @@ fn write_file<D: Destination + 'static>(
     let fd = openat(dir, cname(&temp).as_c_str(), flags, Mode::from_raw_mode(0o600)).map_err(errno)?;
     let written = (|| {
         let mut file = std::fs::File::from(fd.try_clone()?);
-        for id in content {
+        // A few chunks are fetched at once, then written in order.
+        for window in content.chunks(CHUNK_WINDOW) {
             cancelled()?;
-            let chunk = repo.load_blob(BlobType::Data, id)?;
-            file.write_all(&chunk)?;
-            sent(chunk.len() as u64);
+            let chunks: Vec<Result<Vec<u8>>> = std::thread::scope(|scope| {
+                let jobs: Vec<_> =
+                    window.iter().map(|id| scope.spawn(move || repo.load_blob(BlobType::Data, id))).collect();
+                jobs.into_iter().map(|j| j.join().unwrap_or(Err(Error::Bug("download thread failed")))).collect()
+            });
+            for chunk in chunks {
+                let chunk = chunk?;
+                file.write_all(&chunk)?;
+                sent(chunk.len() as u64);
+            }
         }
         let failures = apply_meta(&fd, &entry.meta, 0o644, groups)?;
         renameat(dir, cname(&temp).as_c_str(), dir, cname(name).as_c_str()).map_err(errno)?;
