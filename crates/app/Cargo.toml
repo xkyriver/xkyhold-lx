@@ -17,6 +17,7 @@ xkyhold-dest-local.workspace = true
 xkyhold-secrets.workspace = true
 zeroize.workspace = true
 ureq = { version = "3", features = ["json"] }
+minisign-verify = "0.3.0"
 
 [dev-dependencies]
 tempfile.workspace = true

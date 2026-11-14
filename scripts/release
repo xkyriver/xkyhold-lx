@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+# Prepares a release of XkyHold-lx from the packages `npx tauri build` made
+# (docs/UPDATES.md 4.6): copies them to target/release-<version>/, writes
+# SHA256SUMS, signs each package, writes latest.json with those signatures
+# and signs it too, then checks everything as the app will.
+#
+# Run by whoever holds the signing key, in their own terminal: it asks for
+# the key's password once and passes it to the signer through the
+# environment. Publishing the folder is a separate step.
+#
+#   scripts/release [pt-PT notes file]
+#
+# Environment:
+#   XKYHOLD_LX_SIGNING_KEY  the private key (default: see KEY below)
+#   BUNDLE_DIR              where the packages are
+#   RELEASE_DIR             where to put the release (default target/release-<version>)
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+VERSION=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)
+KEY=${XKYHOLD_LX_SIGNING_KEY:-$HOME/.local/share/xkyhold-lx-signing/xkyhold-lx.key}
+BUNDLE=${BUNDLE_DIR:-src-tauri/target/proof/release/bundle}
+OUT=${RELEASE_DIR:-target/release-$VERSION}
+REPO=https://github.com/xkyriver/xkyhold-lx
+NOTES_PT=${1:-}
+
+APPIMAGE=xkyhold-lx_${VERSION}_amd64.AppImage
+DEB=xkyhold-lx_${VERSION}_amd64.deb
+RPM=xkyhold-lx-${VERSION}-1.x86_64.rpm
+
+[ -f "$KEY" ] || { echo "No signing key at $KEY (set XKYHOLD_LX_SIGNING_KEY)." >&2; exit 1; }
+[ -f "$KEY.pub" ] || { echo "No public key at $KEY.pub." >&2; exit 1; }
+for f in "appimage/$APPIMAGE" "deb/$DEB" "rpm/$RPM"; do
+  [ -f "$BUNDLE/$f" ] || { echo "Missing $BUNDLE/$f: build version $VERSION first." >&2; exit 1; }
+done
+if [ -n "$NOTES_PT" ] && [ ! -f "$NOTES_PT" ]; then
+  echo "No notes file $NOTES_PT." >&2
+  exit 1
+fi
+
+mkdir -p "$OUT"
+cp "$BUNDLE/appimage/$APPIMAGE" "$BUNDLE/deb/$DEB" "$BUNDLE/rpm/$RPM" "$OUT/"
+(cd "$OUT" && sha256sum "$APPIMAGE" "$DEB" "$RPM" > SHA256SUMS)
+# The notes of this version, from CHANGELOG.md.
+awk -v v="$VERSION" '$0 ~ "^## "v" " {f=1; next} /^## / {f=0} f' CHANGELOG.md > "$OUT/notes.md"
+[ -s "$OUT/notes.md" ] || { echo "CHANGELOG.md has no section for $VERSION." >&2; exit 1; }
+
+read -r -s -p "Password of the signing key: " PASSWORD
+echo
+export TAURI_SIGNING_PRIVATE_KEY_PASSWORD=$PASSWORD
+unset PASSWORD
+sign() { npx tauri signer sign -f "$KEY" "$1" > /dev/null; }
+for f in "$APPIMAGE" "$DEB" "$RPM"; do
+  sign "$OUT/$f"
+done
+
+python3 -I - "$OUT" "$VERSION" "$REPO" "$NOTES_PT" "$APPIMAGE" "$DEB" "$RPM" <<'PY'
+import json, os, sys, datetime
+out, version, repo, notes_pt, *names = sys.argv[1:]
+kinds = ["appimage-x86_64", "deb-amd64", "rpm-x86_64"]
+def read(path):
+    with open(path, encoding="utf-8") as f:
+        return f.read().strip()
+notes = {"en": read(os.path.join(out, "notes.md"))}
+if notes_pt:
+    notes["pt-PT"] = read(notes_pt)
+latest = {
+    "version": version,
+    "date": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    "notes": notes,
+    "page": f"{repo}/releases/tag/v{version}",
+    "files": {
+        kind: {
+            "url": f"{repo}/releases/download/v{version}/{name}",
+            "size": os.path.getsize(os.path.join(out, name)),
+            "signature": read(os.path.join(out, name + ".sig")),
+        }
+        for kind, name in zip(kinds, names)
+    },
+}
+with open(os.path.join(out, "latest.json"), "w", encoding="utf-8") as f:
+    json.dump(latest, f, indent=2, ensure_ascii=False)
+    f.write("\n")
+PY
+sign "$OUT/latest.json"
+unset TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+
+cargo run -q -p xkyhold-lx-cli -- check-release "$OUT" --key "$KEY.pub"
+echo "Ready in $OUT: the three packages, their .sig files, SHA256SUMS, latest.json and latest.json.sig."

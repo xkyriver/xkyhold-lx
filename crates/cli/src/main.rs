@@ -102,6 +102,16 @@ enum Command {
     Status,
     /// List the suggested exclusions.
     Presets,
+    /// For whoever publishes: check a prepared release folder (latest.json
+    /// and each package) against a public key, as the app will.
+    #[command(hide = true)]
+    CheckRelease {
+        /// The folder scripts/release prepared.
+        dir: PathBuf,
+        /// The public key file (the .pub that `tauri signer generate` wrote).
+        #[arg(long)]
+        key: PathBuf,
+    },
     /// Connect to your Google Drive (opens the browser).
     Login {
         /// Print the sign-in address instead of opening the browser.
@@ -240,6 +250,17 @@ fn run(cli: &Cli) -> Result<()> {
             let config = Repository::read_config(&dest)?;
             xkyhold_app::forget_key(&config.repo_id)?;
             println!("This computer will ask for the password again.");
+        }
+        Command::CheckRelease { dir, key } => {
+            let key = std::fs::read_to_string(key)?;
+            let sig = std::fs::read_to_string(dir.join("latest.json.sig"))?;
+            let latest = xkyhold_app::update::Latest::verified(&std::fs::read(dir.join("latest.json"))?, &sig, &key)?;
+            for (kind, file) in &latest.files {
+                let name = file.url.rsplit('/').next().unwrap_or_default();
+                latest.verify_package(kind, &std::fs::read(dir.join(name))?, &key)?;
+                println!("ok  {kind:16} {name}");
+            }
+            println!("latest.json {} is signed, and so is every package.", latest.version);
         }
         Command::Presets => {
             for p in PRESETS {
