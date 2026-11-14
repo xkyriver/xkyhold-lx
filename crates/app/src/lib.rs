@@ -26,7 +26,7 @@ use xkyhold_core::tree::{Entry, EntryKind};
 use xkyhold_core::{Error, Result};
 use xkyhold_dest_drive::{Client, Drive, DriveFolder, Http, RefreshingTokens, Ureq};
 use xkyhold_dest_local::LocalFolder;
-use xkyhold_secrets::{SecretService, SecretStore, google_refresh, repo_key};
+use xkyhold_secrets::{MemorySecrets, SecretService, SecretStore, google_refresh, repo_key};
 use zeroize::Zeroizing;
 
 pub use settings::{LastBackup, Settings, Target, What};
@@ -87,9 +87,13 @@ pub fn client() -> Result<Client> {
 /// A Drive client for the account connected on this computer.
 pub fn drive_client(settings: &Settings, limit_kb: Option<u64>) -> Result<Drive> {
     let account = settings.account.as_deref().ok_or_else(|| Error::Session("not connected to Google Drive".into()))?;
-    let refresh = secrets()?
-        .get(&google_refresh(account))
-        .map_err(|e| Error::Usage(e.to_string()))?
+    let key = google_refresh(account);
+    let kept = match secrets() {
+        Ok(store) => store.get(&key).map_err(|e| Error::Usage(e.to_string()))?,
+        Err(_) => None,
+    };
+    let refresh = kept
+        .or_else(|| session_secrets().get(&key).ok().flatten())
         .ok_or_else(|| Error::Session("not connected to Google Drive".into()))?;
     let refresh = String::from_utf8(refresh).map_err(|_| Error::Session("sign in to Google again".into()))?;
     let http: Arc<dyn Http> = Arc::new(Ureq::default());
@@ -101,7 +105,7 @@ pub fn drive_client(settings: &Settings, limit_kb: Option<u64>) -> Result<Drive>
 }
 
 /// Signs in to Google in the browser, keeps the refresh token in the
-/// keyring and returns the account's email address. `show` gets the
+/// keyring (in memory for this run when there is none) and returns the account's email address. `show` gets the
 /// sign-in address (to open it, or to print it).
 pub fn google_sign_in(show: &mut dyn FnMut(&str)) -> Result<String> {
     google_sign_in_until(show, &AtomicBool::new(false))
@@ -115,12 +119,30 @@ pub fn google_sign_in_until(show: &mut dyn FnMut(&str), cancel: &AtomicBool) -> 
     let http: Arc<dyn Http> = Arc::new(http);
     let tokens = Arc::new(RefreshingTokens::new(http.clone(), client, signed.refresh.clone()));
     let account = Drive::new(http, tokens).about_email()?;
-    secrets()?.set(&google_refresh(&account), signed.refresh.as_bytes()).map_err(|e| Error::Usage(e.to_string()))?;
+    let key = google_refresh(&account);
+    if let Err(e) =
+        secrets().and_then(|s| s.set(&key, signed.refresh.as_bytes()).map_err(|e| Error::Usage(e.to_string())))
+    {
+        // No keyring: the session lasts while this program runs.
+        log(&format!("Google session kept in memory only: {e}"));
+        let _ = session_secrets().set(&key, signed.refresh.as_bytes());
+    }
     Ok(account)
 }
 
 pub fn google_sign_out(account: &str) -> Result<()> {
-    secrets()?.delete(&google_refresh(account)).map_err(|e| Error::Usage(e.to_string()))
+    let key = google_refresh(account);
+    let _ = session_secrets().delete(&key);
+    match secrets() {
+        Ok(store) => store.delete(&key).map_err(|e| Error::Usage(e.to_string())),
+        Err(_) => Ok(()),
+    }
+}
+
+/// Secrets for this run only, when the computer has no keyring.
+fn session_secrets() -> &'static MemorySecrets {
+    static SESSION: std::sync::OnceLock<MemorySecrets> = std::sync::OnceLock::new();
+    SESSION.get_or_init(MemorySecrets::default)
 }
 
 /// The destination of a backup, and its local path when it is a folder

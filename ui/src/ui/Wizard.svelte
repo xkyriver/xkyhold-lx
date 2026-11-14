@@ -192,6 +192,9 @@
   {:else if step === 'google'}
     <h1>{t('Connect to Google Drive')}</h1>
     <p class="muted">{t('Your browser opens Google’s sign-in page. Come back here when you finish.')}</p>
+    {#if !status.keyring}
+      <p class="small muted">{t('This computer has no keyring, so you will sign in to Google again each time you open XkyHold-lx.')}</p>
+    {/if}
     <button class="btn primary big block" onclick={google} disabled={busy}>
       {busy ? t('Waiting for Google…') : t('Continue with Google')}
     </button>
@@ -318,7 +321,9 @@
           {#each REMINDER_CHOICES as days (days)}<option value={days}>{reminderLabel(days)}</option>{/each}
         </select>
       </div>
-      {#if !remember || !status.keyring}
+      {#if !status.keyring}
+        <p class="small muted">{t('Automatic backups need a keyring on this computer, such as GNOME Keyring or KWallet.')}</p>
+      {:else if !remember}
         <p class="small muted">{t('Automatic backups need this computer to keep the key of your backup, which you chose not to.')}</p>
       {/if}
     {/if}

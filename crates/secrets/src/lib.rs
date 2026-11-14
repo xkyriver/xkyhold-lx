@@ -45,11 +45,15 @@ pub fn google_refresh(account: &str) -> String {
 pub struct SecretService;
 
 impl SecretService {
-    /// Connects to the Secret Service; fails if there is none.
+    /// Connects to the Secret Service; fails if there is none. A session
+    /// bus alone is not enough: a lookup must answer (a fresh user started
+    /// with `machinectl shell` has the bus and no keyring daemon).
     pub fn connect() -> Result<Self> {
         let store = zbus_secret_service_keyring_store::Store::new().map_err(|e| SecretsError(e.to_string()))?;
         keyring_core::set_default_store(store);
-        Ok(SecretService)
+        let service = SecretService;
+        service.get("probe")?;
+        Ok(service)
     }
 
     fn entry(key: &str) -> Result<Entry> {

@@ -245,4 +245,8 @@ export const ptPT: Record<string, string> = {
   'You can change this later in Settings.': 'Podes mudar isto mais tarde nas Definições.',
   'Another folder, such as a disk…': 'Outra pasta, por exemplo num disco…',
   'Choose another folder…': 'Escolher outra pasta…',
+  'This computer has no keyring, so you will sign in to Google again each time you open XkyHold-lx.':
+    'Este computador não tem porta-chaves, por isso vais ter de entrar no Google de novo sempre que abrires a XkyHold-lx.',
+  'Automatic backups need a keyring on this computer, such as GNOME Keyring or KWallet.':
+    'As cópias automáticas precisam de um porta-chaves neste computador, como o GNOME Keyring ou o KWallet.',
 }
