@@ -1,6 +1,6 @@
 # XkyHold-lx — plano base
 
-Data: 13/11/2026 · Estado: **Fases 0 a 6 concluídas (motor, CLI, Google Drive, janela, cópia automática e leitura v2 na web, 14/11/2026); Fase 7: provas, pacotes, página e release 1.0.0 preparados; falta publicar. O deploy da web é do proprietário e tem de vir antes da release**
+Data: 13/11/2026 · Estado: **Fases 0 a 6 concluídas (motor, CLI, Google Drive, janela, cópia automática e leitura v2 na web, 14/11/2026); Fase 7: v1.0.0 publicada no GitHub a 14/11/2026; falta o deploy do site da XkyHold. O deploy da web é do proprietário e tem de vir antes da release**
 
 A XkyHold-lx é a app de Linux da família XkyHold. Faz cópias de segurança cifradas da pasta pessoal (`$HOME`) inteira, ou de partes dela, incluindo ficheiros ocultos, configurações, chaves, permissões e ligações simbólicas. Existe para resolver o que a XkyHold web não consegue por correr num browser. Segue o mesmo desenho e partilha o formato de repositório.
 
@@ -389,7 +389,8 @@ No repositório `xkyhold`, commit `935c1a3` (só local; o push e o deploy são d
 - Versão 1.0.0 em `Cargo.toml`, `package.json` e `ui/package.json`; `<releases>` na metainfo (agora valida sem avisos); `CHANGELOG.md` com as notas da release (o que faz, instalar, antes de desinstalar, limites conhecidos); estado no `README.md`.
 - Revisão do histórico inteiro (43 commits) antes de ficar público: sem segredos, tokens, chaves privadas, emails privados, nomes de empregador nem ficheiros acima de 1 MB. O plano refere o nome do disco externo de prova, o nome desta máquina (no nome do repositório de prova) e o utilizador de teste.
 - Pacotes compilados com o cliente Google embutido e reunidos em `target/release-1.0.0/` (fora do git): AppImage 109 MB, `.deb` 5,3 MB, `.rpm` 5,3 MB, `SHA256SUMS` e `CHANGELOG.md`. O AppImage responde `xkyhold-lx 1.0.0`. 61 testes a passar.
-- Por fazer, cada passo com o "sim" do proprietário: (1) tornar o repositório `xkyriver/xkyhold-lx` público; (2) etiqueta `v1.0.0` e push; (3) criar a release no GitHub com os quatro ficheiros e as notas; (4) push e deploy do `main` da XkyHold (leitura v2, página `/linux/`, privacidade), depois da release, porque os botões de download apontam para ela.
+- **Publicada a 14/11/2026, com o "Sim, publica" do proprietário:** repositório `xkyriver/xkyhold-lx` público; etiqueta `v1.0.0` em `e0de444`; release https://github.com/xkyriver/xkyhold-lx/releases/tag/v1.0.0 com o AppImage, o `.deb`, o `.rpm` e o `SHA256SUMS` (não é rascunho nem pré-release). Verificado: `releases/latest` responde e o `.deb` descarregado confere com o `SHA256SUMS`.
+- Falta, do proprietário: push e deploy do `main` da XkyHold (leitura v2, página `/linux/`, privacidade); só então a Fase 7 fecha (critério: v1.0.0 publicada, com a página no ar).
 
 ## 8. Questões em aberto
 
