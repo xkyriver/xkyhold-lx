@@ -243,4 +243,6 @@ export const ptPT: Record<string, string> = {
   'Back up automatically every day': 'Fazer uma cópia automática todos os dias',
   'Automatic backups need this computer to keep the key of your backup, which you chose not to.': 'As cópias automáticas precisam que este computador guarde a chave da tua cópia, e escolheste não a guardar.',
   'You can change this later in Settings.': 'Podes mudar isto mais tarde nas Definições.',
+  'Another folder, such as a disk…': 'Outra pasta, por exemplo num disco…',
+  'Choose another folder…': 'Escolher outra pasta…',
 }

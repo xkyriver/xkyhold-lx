@@ -193,11 +193,12 @@ export async function restoreItems(
   ids: string[],
   original: boolean,
   folder: string,
+  to: string | null,
   conflict: string,
 ): Promise<void> {
   startJob('restore')
   try {
-    await api.restoreStart(snapshot, path, ids, original, folder, conflict)
+    await api.restoreStart(snapshot, path, ids, original, folder, to, conflict)
   } catch (err) {
     app.job = null
     fail(err)

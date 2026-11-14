@@ -135,7 +135,7 @@ Mesmos tokens de cor, tipografia, cartão central e componentes de `../xkyhold/s
 
 - **Assistente:** 1. Destino (Google ou pasta local; deteta um backup existente e encurta para "palavra-passe → restaurar") → 2. O que guardar (pasta pessoal inteira, com "Deixar de fora…" e as sugestões) → 3. Palavra-passe → 4. Chave de recuperação → 5. Lembrete ou cópia automática.
 - **Início:** estado, última cópia, próxima, botão "Fazer cópia agora", progresso com o ficheiro atual, cancelar. Avisos acionáveis em faixas.
-- **Restaurar:** datas, navegação com caixas de seleção. Destino: outra pasta (por omissão `~/XkyHold-restore/<data>/`) ou o sítio original. No sítio original, a app nunca substitui em silêncio: mostra o que já existe e o utilizador escolhe saltar, substituir ou guardar ao lado.
+- **Restaurar:** datas, navegação com caixas de seleção. Destino: outra pasta (por omissão `~/XkyHold-restore/<data>/`; ou dentro de uma pasta escolhida pelo utilizador, também fora da home, como um disco externo — aprovado pelo proprietário a 14/11/2026) ou o sítio original. No sítio original, a app nunca substitui em silêncio: mostra o que já existe e o utilizador escolhe saltar, substituir ou guardar ao lado.
 - **Definições:** o que guardar e exclusões, lembrete / cópia automática e frequência, retenção, verificar, destino e conta, alterar palavra-passe, língua, tema, remover deste computador.
 - Textos: origem em inglês, tradução pt-PT com "tu". Reaproveitar as frases da XkyHold onde servirem.
 - WebKitGTK em NVIDIA/Wayland pode abrir uma janela em branco: testar na Fase 0 e, se preciso, definir `WEBKIT_DISABLE_DMABUF_RENDERER=1` no arranque.

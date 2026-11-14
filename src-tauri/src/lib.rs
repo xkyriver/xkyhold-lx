@@ -525,9 +525,17 @@ async fn entries(state: State<'_, AppState>, snapshot: String, path: Vec<String>
 }
 
 /// Where a restore goes: the original place inside home, or a new folder
-/// `~/XkyHold-restore/<name>` (the window names it by the backup's local
-/// date and time).
-fn restore_target(home: &Path, snap: &Snapshot, dir: &[Vec<u8>], original: bool, name: Option<&str>) -> Res<PathBuf> {
+/// `<base>/<name>`, where the base is `~/XkyHold-restore` or a folder the
+/// user chose (anywhere they can write, an external disk for example), and
+/// the window names it by the backup's local date and time.
+fn restore_target(
+    home: &Path,
+    snap: &Snapshot,
+    dir: &[Vec<u8>],
+    original: bool,
+    name: Option<&str>,
+    base: Option<&Path>,
+) -> Res<PathBuf> {
     use std::os::unix::ffi::OsStrExt;
     if original {
         if !is_home(snap) {
@@ -544,7 +552,11 @@ fn restore_target(home: &Path, snap: &Snapshot, dir: &[Vec<u8>], original: bool,
     if name.is_empty() || name.contains('/') || name == "." || name == ".." {
         return Err(ui("usage", "not a folder name"));
     }
-    Ok(home.join("XkyHold-restore").join(name))
+    match base {
+        Some(base) if !base.is_absolute() => Err(ui("usage", "the folder must be a full path")),
+        Some(base) => Ok(base.join(name)),
+        None => Ok(home.join("XkyHold-restore").join(name)),
+    }
 }
 
 /// The chosen items that already exist in their original place.
@@ -558,7 +570,7 @@ async fn restore_existing(
     let guard = state.session()?;
     let session = guard.as_ref().ok_or_else(|| ui("locked", "the backup is not open"))?;
     let snap = find_snapshot(&session.repo, &snapshot)?;
-    let target = restore_target(&xkyhold_app::home()?, &snap, &decode_path(&path)?, true, None)?;
+    let target = restore_target(&xkyhold_app::home()?, &snap, &decode_path(&path)?, true, None, None)?;
     let mut found = Vec::new();
     for id in decode_path(&ids)? {
         use std::os::unix::ffi::OsStrExt;
@@ -580,6 +592,7 @@ async fn restore_start(
     ids: Vec<String>,
     original: bool,
     folder: Option<String>,
+    to: Option<String>,
     conflict: String,
 ) -> Res<()> {
     let dir = decode_path(&path)?;
@@ -595,8 +608,11 @@ async fn restore_start(
         let refs: Vec<&[u8]> = dir.iter().map(Vec::as_slice).collect();
         let entries: Vec<_> =
             xkyhold_app::entries(&s.repo, &snap, &refs)?.into_iter().filter(|e| wanted.contains(&e.name)).collect();
-        let target = restore_target(&home, &snap, &dir, original, folder.as_deref())?;
-        xkyhold_app::inside_home(&home, &target)?;
+        let target = restore_target(&home, &snap, &dir, original, folder.as_deref(), to.as_deref().map(Path::new))?;
+        // The original place is always inside home; another folder is the user's choice.
+        if original {
+            xkyhold_app::inside_home(&home, &target)?;
+        }
         std::fs::create_dir_all(&target).map_err(Error::from)?;
         let r = restore(&s.repo, &entries, &target, &RestoreOptions { conflict, cancel: Some(cancel) }, &mut |r| {
             progress.send("restore", r.files, r.bytes, &r.current)
@@ -786,11 +802,12 @@ async fn count_sizes(app: AppHandle, state: State<'_, AppState>) -> Res<()> {
     Ok(())
 }
 
-/// Opens a folder inside home in the file manager.
+/// Opens a folder in the file manager (one the window just restored into).
 #[tauri::command]
 async fn open_folder(path: String) -> Res<()> {
-    let home = xkyhold_app::home()?;
-    xkyhold_app::inside_home(&home, Path::new(&path))?;
+    if !Path::new(&path).is_dir() {
+        return Err(ui("usage", "not a folder"));
+    }
     std::process::Command::new("xdg-open").arg(&path).spawn().map_err(Error::from)?;
     Ok(())
 }

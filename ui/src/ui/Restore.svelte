@@ -1,6 +1,7 @@
 <script lang="ts">
   // Pick a backup by date, browse it, tick what to bring back, then choose
-  // where: a new folder (the default) or where it was. In the original
+  // where: a new folder in home (the default), a new folder inside a folder
+  // the user chooses (a disk), or where it was. In the original
   // place nothing is replaced silently: what already exists is shown and
   // the user chooses to skip it, replace it or keep both.
   import { api } from '../lib/api'
@@ -23,7 +24,10 @@
   let ticked = $state<Record<string, boolean>>({})
   let loading = $state(false)
   let error = $state<string | null>(null)
-  let original = $state(false)
+  /** Where to: a new folder in home, a folder the user chose, or where it was. */
+  let where = $state<'home' | 'other' | 'original'>('home')
+  const original = $derived(where === 'original')
+  let otherFolder = $state<string | null>(null)
   let existing = $state<string[] | null>(null)
   let conflict = $state('keep-both')
 
@@ -61,7 +65,7 @@
   async function open(s: SnapInfo) {
     snapshot = s
     levels = []
-    original = false
+    where = 'home'
     await load(formatWhen(s.time), [])
   }
 
@@ -97,6 +101,13 @@
     }
   })
 
+  /** The system's folder chooser; going back to the default if nothing is chosen. */
+  async function pickOther() {
+    const picked = await api.pickFolder().catch(() => null)
+    if (picked) otherFolder = picked
+    else if (!otherFolder) where = 'home'
+  }
+
   function restore() {
     if (!snapshot || !level) return
     void restoreItems(
@@ -105,6 +116,7 @@
       chosen.map((e) => e.id),
       original,
       folderName,
+      where === 'other' ? otherFolder : null,
       original ? conflict : 'keep-both',
     )
   }
@@ -208,9 +220,16 @@
     {#if chosen.length > 0}
       <fieldset class="stack tight">
         <legend>{t('Restore to')}</legend>
-        <label class="check"><input type="radio" bind:group={original} value={false} /> {t('A new folder: {path}', { path: newFolder })}</label>
+        <label class="check"><input type="radio" bind:group={where} value="home" /> {t('A new folder: {path}', { path: newFolder })}</label>
+        <label class="check">
+          <input type="radio" bind:group={where} value="other" onchange={pickOther} />
+          {otherFolder ? t('A new folder: {path}', { path: `${otherFolder}/${folderName}/` }) : t('Another folder, such as a disk…')}
+        </label>
+        {#if where === 'other' && otherFolder}
+          <div><button class="link small" onclick={pickOther}>{t('Choose another folder…')}</button></div>
+        {/if}
         {#if snapshot.home}
-          <label class="check"><input type="radio" bind:group={original} value={true} /> {t('Where they were, in your home folder')}</label>
+          <label class="check"><input type="radio" bind:group={where} value="original" /> {t('Where they were, in your home folder')}</label>
         {/if}
       </fieldset>
 
@@ -235,7 +254,7 @@
       <button
         class="btn primary"
         onclick={restore}
-        disabled={chosen.length === 0 || !!app.job || (original && existing === null)}
+        disabled={chosen.length === 0 || !!app.job || (original && existing === null) || (where === 'other' && !otherFolder)}
       >
         {chosen.length === 0 ? t('Restore') : t('Restore {n}', { n: chosen.length })}
       </button>

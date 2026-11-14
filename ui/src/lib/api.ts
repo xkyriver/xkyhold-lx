@@ -123,8 +123,16 @@ export const api = {
   entries: (snapshot: string, path: string[]) => invoke<EntryInfo[]>('entries', { snapshot, path }),
   restoreExisting: (snapshot: string, path: string[], ids: string[]) =>
     invoke<string[]>('restore_existing', { snapshot, path, ids }),
-  restoreStart: (snapshot: string, path: string[], ids: string[], original: boolean, folder: string, conflict: string) =>
-    invoke<void>('restore_start', { snapshot, path, ids, original, folder, conflict }),
+  /** `to`: a folder the user chose, instead of ~/XkyHold-restore; null for the default. */
+  restoreStart: (
+    snapshot: string,
+    path: string[],
+    ids: string[],
+    original: boolean,
+    folder: string,
+    to: string | null,
+    conflict: string,
+  ) => invoke<void>('restore_start', { snapshot, path, ids, original, folder, to, conflict }),
   checkStart: (full: boolean) => invoke<void>('check_start', { full }),
   saveSettings: (
     patch: Partial<

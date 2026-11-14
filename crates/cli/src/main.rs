@@ -80,7 +80,8 @@ enum Command {
         snapshot: String,
         /// Items to restore (paths inside the backup); everything by default.
         paths: Vec<String>,
-        /// Where to restore. Restoring into your home folder itself must be asked for explicitly.
+        /// Where to restore: any folder you can write to, inside or outside your home
+        /// folder (an external disk, for example). It is created if missing.
         #[arg(long)]
         to: PathBuf,
         #[arg(long, value_enum, default_value_t = ConflictArg::KeepBoth)]
@@ -352,9 +353,7 @@ fn run(cli: &Cli) -> Result<()> {
             }
         }
         Command::Restore { snapshot, paths, to, conflict } => {
-            let home = xkyhold_app::home()?;
             let target = std::path::absolute(to)?;
-            xkyhold_app::inside_home(&home, &target)?;
             let repo = open(cli)?;
             let snap = xkyhold_app::pick(&repo, snapshot)?;
             let mut entries = Vec::new();

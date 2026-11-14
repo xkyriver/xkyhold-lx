@@ -63,9 +63,12 @@ fn init_backup_list_restore_check_forget() {
     assert!(text(&cli(&home, &["status"])).contains("Format 2"));
     assert!(text(&cli(&home, &["forget", "--keep-months", "3"])).contains("0 old backups removed"));
 
-    // Restoring outside the home folder is refused.
+    // A restore may go outside the home folder, to a folder the user chose
+    // (an external disk): here, next to the temporary home.
+    let elsewhere = tmp.path().join("disk/restore");
     let out = Command::new(env!("CARGO_BIN_EXE_xkyhold-lx-cli"))
-        .args(["restore", "latest", "--to", "/tmp/elsewhere"])
+        .args(["restore", "latest", "Documents", "--to"])
+        .arg(&elsewhere)
         .env("HOME", &home)
         .env_remove("XDG_CONFIG_HOME")
         .env_remove("XDG_CACHE_HOME")
@@ -75,8 +78,8 @@ fn init_backup_list_restore_check_forget() {
         .env("XKYHOLD_LX_PASSWORD", "correct horse battery staple")
         .output()
         .unwrap();
-    assert!(!out.status.success());
-    assert!(String::from_utf8_lossy(&out.stderr).contains("inside your home folder"));
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(std::fs::read(elsewhere.join("Documents/notes.txt")).unwrap(), b"hello");
 }
 
 /// Without --repo, the backup set up on this computer is used, with what

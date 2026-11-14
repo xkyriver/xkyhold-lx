@@ -9,8 +9,10 @@ the code.
 
 ## Hard rules
 
-- Scope is `$HOME` only. Refuse paths outside it, never follow symlinks
-  while backing up, never run as root.
+- What is backed up is `$HOME` only: refuse source paths outside it, never
+  follow symlinks while backing up, never run as root. A restore may go to
+  any folder the user chooses (an external disk, for example); restoring
+  to the original place stays inside `$HOME`.
 - Encryption happens on the user's computer; destinations only see
   ciphertext. "Delete" in Drive is always "move to trash"; in a local
   folder it moves into the repository's `trash/`.
