@@ -33,6 +33,8 @@ export interface Settings {
   language: string | null
   theme: string
   last_backup: LastBackup | null
+  automatic: 'off' | 'hourly' | 'daily' | 'weekly'
+  notify_success: boolean
 }
 
 export interface Status {
@@ -44,6 +46,8 @@ export interface Status {
   writable: boolean
   remembered: boolean
   job: string | null
+  running_here: boolean
+  timer: boolean
   google_client: boolean
   keyring: boolean
 }
@@ -122,7 +126,11 @@ export const api = {
   restoreStart: (snapshot: string, path: string[], ids: string[], original: boolean, folder: string, conflict: string) =>
     invoke<void>('restore_start', { snapshot, path, ids, original, folder, conflict }),
   checkStart: (full: boolean) => invoke<void>('check_start', { full }),
-  saveSettings: (patch: Partial<Pick<Settings, 'what' | 'remind_days' | 'keep_months' | 'language' | 'theme'>>) =>
+  saveSettings: (
+    patch: Partial<
+      Pick<Settings, 'what' | 'remind_days' | 'keep_months' | 'language' | 'theme' | 'automatic' | 'notify_success'>
+    >,
+  ) =>
     invoke<Settings>('save_settings', { patch }),
   changePassword: (secret: Secret, newPassword: string) => invoke<void>('change_password', { secret, newPassword }),
   setRemember: (remember: boolean) => invoke<void>('set_remember', { remember }),

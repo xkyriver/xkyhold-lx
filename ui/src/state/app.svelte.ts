@@ -88,6 +88,12 @@ export function explain(err: unknown): string {
       return t('This copy of XkyHold-lx was built without Google Drive. Use a folder on this computer or a disk.')
     case 'locked':
       return t('Open your backup first.')
+    case 'running-here':
+      return t('A backup is already running on this computer. Wait for it to finish.')
+    case 'needs-key':
+      return t('Automatic backups need this computer to keep the key of your backup. Tick “Open this backup on this computer without the password” first.')
+    case 'systemd':
+      return t('This system does not let XkyHold-lx run on a schedule (systemd user timers are missing).')
     default:
       return t('Something went wrong. Please try again.')
   }
@@ -267,4 +273,8 @@ export async function start(): Promise<void> {
   }
   app.ready = true
   await openBackup()
+  // Automatic backups run in another process: notice them and their end.
+  setInterval(() => {
+    if (!app.job) void refresh().catch(() => {})
+  }, 20_000)
 }

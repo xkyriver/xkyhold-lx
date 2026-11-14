@@ -6,6 +6,12 @@
   import Unlock from './Unlock.svelte'
 
   const status = $derived(app.status!)
+  const EVERY: Record<string, string> = {
+    // i18n-keys
+    hourly: 'every hour',
+    daily: 'every day',
+    weekly: 'every week',
+  }
   const last = $derived(status.settings.last_backup)
   const working = $derived(app.job?.kind === 'backup')
   const overdue = $derived(!!last && reminder(last.time, status.settings.remind_days).due)
@@ -67,9 +73,17 @@
           {t('This backup was made by XkyHold in a browser. You can restore from it, but new backups need a backup made by XkyHold-lx.')}
         </p>
       {:else if status.open}
+        {#if status.running_here}
+          <p class="small muted">{t('An automatic backup is running right now. It finishes by itself, even with this window closed.')}</p>
+        {/if}
         <div>
-          <button class="btn primary big" onclick={backupNow} disabled={!!app.job || app.opening}>{t('Back up now')}</button>
+          <button class="btn primary big" onclick={backupNow} disabled={!!app.job || app.opening || status.running_here}>
+            {t('Back up now')}
+          </button>
         </div>
+        {#if status.settings.automatic !== 'off'}
+          <p class="small muted">{t('Automatic backups are on: {when}.', { when: t(EVERY[status.settings.automatic]) })}</p>
+        {/if}
       {:else if !app.opening}
         <div><button class="btn primary" onclick={openBackup}>{t('Try again')}</button></div>
       {/if}

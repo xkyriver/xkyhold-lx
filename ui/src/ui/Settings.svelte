@@ -1,5 +1,6 @@
 <script lang="ts">
   import { api } from '../lib/api'
+  import type { Settings } from '../lib/api'
   import { LANGUAGES, t } from '../lib/i18n.svelte'
   import { KEEP_CHOICES, REMINDER_CHOICES } from '../lib/reminder'
   import { app, checkBackup, explain, refresh, saveSettings, signIn, stopJob } from '../state/app.svelte'
@@ -22,6 +23,13 @@
 
   const reminderLabel = (days: number) =>
     days === 0 ? t('Never') : days === 1 ? t('Every day') : days === 7 ? t('Every week') : t('Every {n} days', { n: days })
+  const AUTOMATIC: { id: Settings['automatic']; label: string }[] = [
+    // i18n-keys
+    { id: 'off', label: 'Off' },
+    { id: 'hourly', label: 'Every hour' },
+    { id: 'daily', label: 'Every day' },
+    { id: 'weekly', label: 'Every week' },
+  ]
   const keepLabel = (months: number) =>
     months === 0 ? t('Forever') : months === 12 ? t('At least a year') : t('At least {n} months', { n: months })
 
@@ -68,12 +76,44 @@
 <section class="card stack">
   <h2>{t('Backups')}</h2>
   <div>
-    <label for="remind">{t('Remind me to back up')}</label>
-    <select id="remind" value={s.remind_days} onchange={(e) => saveSettings({ remind_days: Number(e.currentTarget.value) })}>
-      {#each REMINDER_CHOICES as days (days)}<option value={days}>{reminderLabel(days)}</option>{/each}
+    <label for="automatic">{t('Back up automatically')}</label>
+    <select
+      id="automatic"
+      value={s.automatic}
+      disabled={s.automatic === 'off' && !status.remembered}
+      onchange={(e) => saveSettings({ automatic: e.currentTarget.value as Settings['automatic'] })}
+    >
+      {#each AUTOMATIC as choice (choice.id)}<option value={choice.id}>{t(choice.label)}</option>{/each}
     </select>
-    <p class="small muted">{t('XkyHold-lx never starts a backup by itself unless you ask it to. It reminds you when one is due.')}</p>
+    <p class="small muted">
+      {#if s.automatic !== 'off'}
+        {t('XkyHold-lx backs up by itself, also with this window closed, and tells you only if something goes wrong.')}
+      {:else if !status.remembered}
+        {t('To back up automatically, first tick “Open this backup on this computer without the password” under Password.')}
+      {:else}
+        {t('Off: XkyHold-lx only reminds you. Backups start when you choose.')}
+      {/if}
+    </p>
   </div>
+  {#if s.automatic !== 'off'}
+    <label class="check">
+      <input type="checkbox" checked={s.notify_success} onchange={(e) => saveSettings({ notify_success: e.currentTarget.checked })} />
+      {t('Also tell me when an automatic backup goes well')}
+    </label>
+  {:else}
+    <div>
+      <label for="remind">{t('Remind me to back up')}</label>
+      <select id="remind" value={s.remind_days} onchange={(e) => saveSettings({ remind_days: Number(e.currentTarget.value) })}>
+        {#each REMINDER_CHOICES as days (days)}<option value={days}>{reminderLabel(days)}</option>{/each}
+      </select>
+      <p class="small muted">{t('Reminders appear as notifications, also with this window closed.')}</p>
+    </div>
+  {/if}
+  {#if !status.timer && (s.automatic !== 'off' || s.remind_days > 0)}
+    <div class="banner warn">
+      <span>{t('Reminders and automatic backups cannot run with this window closed: this system has no systemd user timers.')}</span>
+    </div>
+  {/if}
   <div>
     <label for="keep">{t('Keep backups')}</label>
     <select id="keep" value={s.keep_months} onchange={(e) => saveSettings({ keep_months: Number(e.currentTarget.value) })}>

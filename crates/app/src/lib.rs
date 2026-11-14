@@ -3,6 +3,7 @@
 //! with the keyring or a password, and running a backup end to end.
 
 pub mod scan;
+pub mod schedule;
 pub mod settings;
 
 use std::io::Write as _;
@@ -257,6 +258,8 @@ pub fn run_backup(
     } else {
         Some(what.only.iter().map(|p| inside_home(&home, Path::new(p))).collect::<Result<Vec<_>>>()?)
     };
+    // One backup at a time on this computer: the window, the timer, the CLI.
+    let _here = schedule::LocalLock::take()?;
     let device = device();
     // The repository counts uploads for as long as it is open.
     let sent_before = repo.uploaded_bytes;

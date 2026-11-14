@@ -1,10 +1,21 @@
 // Prevents an extra console window on Windows; harmless on Linux.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-fn main() {
+fn main() -> std::process::ExitCode {
+    // The hourly systemd timer: no window, no WebKit.
+    if std::env::args_os().nth(1).is_some_and(|a| a == "--scheduled") {
+        return match xkyhold_app::schedule::run_scheduled() {
+            Ok(()) => std::process::ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("xkyhold-lx: {e}");
+                std::process::ExitCode::FAILURE
+            }
+        };
+    }
     #[cfg(target_os = "linux")]
     ensure_webkit_env();
-    xkyhold_lx_lib::run()
+    xkyhold_lx_lib::run();
+    std::process::ExitCode::SUCCESS
 }
 
 /// WebKitGTK's DMABUF renderer fails with the NVIDIA proprietary driver: the

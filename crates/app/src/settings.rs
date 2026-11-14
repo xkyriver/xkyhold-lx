@@ -59,6 +59,14 @@ pub struct Settings {
     /// "system", "light" or "dark".
     pub theme: String,
     pub last_backup: Option<LastBackup>,
+    /// Automatic backups: "off", "hourly", "daily" or "weekly".
+    pub automatic: String,
+    /// Also notify when an automatic backup goes well (problems always do).
+    pub notify_success: bool,
+    /// When the last reminder or problem was shown, to show each at most
+    /// once a day.
+    pub last_reminded: Option<String>,
+    pub last_problem: Option<String>,
 }
 
 impl Default for Settings {
@@ -73,6 +81,10 @@ impl Default for Settings {
             language: None,
             theme: "system".into(),
             last_backup: None,
+            automatic: "off".into(),
+            notify_success: false,
+            last_reminded: None,
+            last_problem: None,
         }
     }
 }

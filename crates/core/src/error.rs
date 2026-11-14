@@ -27,6 +27,10 @@ pub enum Error {
     /// Another device is using the backup (a fresh lock).
     #[error("another device is using this backup right now")]
     Busy,
+    /// Another backup is already running on this computer (the window,
+    /// the automatic backup or the command line).
+    #[error("another backup is already running on this computer")]
+    RunningHere,
     /// The operation was cancelled.
     #[error("cancelled")]
     Aborted,
@@ -69,6 +73,7 @@ impl Error {
             Error::ReadOnly => "read-only",
             Error::Exists => "exists",
             Error::Busy => "busy",
+            Error::RunningHere => "running-here",
             Error::Aborted => "aborted",
             Error::Read { .. } => "read",
             Error::Root => "root",

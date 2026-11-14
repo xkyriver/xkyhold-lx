@@ -5,6 +5,8 @@ use std::path::Path;
 use std::process::{Command, Output};
 
 fn cli(home: &Path, args: &[&str]) -> Output {
+    // The local backup lock; caches are always left out of backups.
+    std::fs::create_dir_all(home.join(".cache")).unwrap();
     let out = Command::new(env!("CARGO_BIN_EXE_xkyhold-lx-cli"))
         .args(args)
         .current_dir(home)
@@ -13,6 +15,7 @@ fn cli(home: &Path, args: &[&str]) -> Output {
         .env_remove("XDG_CONFIG_HOME")
         .env_remove("XDG_CACHE_HOME")
         .env_remove("XDG_STATE_HOME")
+        .env("XDG_RUNTIME_DIR", home.join(".cache"))
         .env("XKYHOLD_LX_REPO", home.join("Backups/XkyHold/test"))
         .env("XKYHOLD_LX_PASSWORD", "correct horse battery staple")
         .output()
@@ -67,6 +70,7 @@ fn init_backup_list_restore_check_forget() {
         .env_remove("XDG_CONFIG_HOME")
         .env_remove("XDG_CACHE_HOME")
         .env_remove("XDG_STATE_HOME")
+        .env("XDG_RUNTIME_DIR", home.join(".cache"))
         .env("XKYHOLD_LX_REPO", home.join("Backups/XkyHold/test"))
         .env("XKYHOLD_LX_PASSWORD", "correct horse battery staple")
         .output()
@@ -101,6 +105,7 @@ fn uses_the_configured_backup() {
             .env_remove("XDG_CONFIG_HOME")
             .env_remove("XDG_CACHE_HOME")
             .env_remove("XDG_STATE_HOME")
+            .env("XDG_RUNTIME_DIR", tmp.path())
             .env_remove("XKYHOLD_LX_REPO")
             .env_remove("XKYHOLD_LX_DRIVE")
             .env("XKYHOLD_LX_PASSWORD", "correct horse battery staple")

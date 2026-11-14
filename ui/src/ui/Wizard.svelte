@@ -36,6 +36,7 @@
   let copied = $state(false)
   let what = $state<What>({ only: [], leave_out: [], presets: [], patterns: [], cross_mounts: [] })
   let remindDays = $state(1)
+  let automatic = $state(false)
 
   $effect(() => {
     if (!name && status) name = defaultName(status.home)
@@ -156,7 +157,7 @@
   }
 
   async function finish() {
-    await saveSettings({ remind_days: remindDays })
+    await saveSettings(automatic ? { automatic: 'daily' } : { remind_days: remindDays, automatic: 'off' })
     done('home')
   }
 
@@ -293,14 +294,28 @@
       <button class="btn primary" onclick={() => (step = 'remind')} disabled={!saved}>{t('Continue')}</button>
     </div>
   {:else if step === 'remind'}
-    <h1>{t('Reminders')}</h1>
-    <p class="muted">{t('XkyHold-lx never starts a backup by itself unless you ask it to. It reminds you when one is due.')}</p>
-    <div>
-      <label for="remind">{t('Remind me to back up')}</label>
-      <select id="remind" bind:value={remindDays}>
-        {#each REMINDER_CHOICES as days (days)}<option value={days}>{reminderLabel(days)}</option>{/each}
-      </select>
+    <h1>{t('Reminders or automatic backups')}</h1>
+    <div class="stack tight" role="radiogroup">
+      <label class="option"><input type="radio" bind:group={automatic} value={false} /> {t('Remind me, and I start each backup')}</label>
+      <label class="option" class:disabled={!remember || !status.keyring}>
+        <input type="radio" bind:group={automatic} value={true} disabled={!remember || !status.keyring} />
+        {t('Back up automatically every day')}
+      </label>
     </div>
+    {#if automatic}
+      <p class="small muted">{t('XkyHold-lx backs up by itself, also with this window closed, and tells you only if something goes wrong.')}</p>
+    {:else}
+      <div>
+        <label for="remind">{t('Remind me to back up')}</label>
+        <select id="remind" bind:value={remindDays}>
+          {#each REMINDER_CHOICES as days (days)}<option value={days}>{reminderLabel(days)}</option>{/each}
+        </select>
+      </div>
+      {#if !remember || !status.keyring}
+        <p class="small muted">{t('Automatic backups need this computer to keep the key of your backup, which you chose not to.')}</p>
+      {/if}
+    {/if}
+    <p class="small muted">{t('You can change this later in Settings.')}</p>
     <div class="row end"><button class="btn primary" onclick={finish}>{t('Finish')}</button></div>
   {:else if step === 'unlock'}
     <h1>{t('Open “{name}”', { name: kind === 'drive' ? choice : folder })}</h1>
@@ -400,6 +415,11 @@
   .option:has(input:checked) {
     border-color: var(--accent);
     background: var(--accent-soft);
+  }
+
+  .option.disabled {
+    cursor: default;
+    opacity: 0.6;
   }
 
   .check {

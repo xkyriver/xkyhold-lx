@@ -45,6 +45,7 @@ impl From<Error> for UiError {
             // Errors from the glue that the UI words differently.
             Error::Usage(m) if m.contains("keyring") => "keyring",
             Error::Usage(m) if m.contains("Google client") => "no-client",
+            Error::Usage(m) if m.contains("systemctl") => "systemd",
             _ => e.kind(),
         };
         xkyhold_app::log(&format!("{kind}: {e}"));
@@ -105,6 +106,10 @@ struct Status {
     writable: bool,
     remembered: bool,
     job: Option<&'static str>,
+    /// A backup runs on this computer outside this window (the timer, the CLI).
+    running_here: bool,
+    /// The hourly timer is installed.
+    timer: bool,
     google_client: bool,
     keyring: bool,
 }
@@ -126,6 +131,8 @@ async fn status(state: State<'_, AppState>) -> Res<Status> {
         writable,
         remembered,
         job: state.running(),
+        running_here: state.running().is_none() && xkyhold_app::schedule::running_here(),
+        timer: xkyhold_app::schedule::timer_enabled(),
         google_client: xkyhold_dest_drive::Client::from_env().is_some(),
         keyring: xkyhold_secrets::SecretService::connect().is_ok(),
     })
@@ -235,6 +242,16 @@ impl Secret {
     }
 }
 
+/// Puts the hourly timer in step with the settings. A system without
+/// systemd still works; only reminders and automatic backups with the
+/// window closed are missing.
+fn sync_timer() {
+    match Settings::load().and_then(|s| xkyhold_app::schedule::sync_units(&s)) {
+        Ok(()) => {}
+        Err(e) => xkyhold_app::log(&format!("the timer could not be updated: {e}")),
+    }
+}
+
 /// Records the backup as this computer's and keeps it open.
 fn adopt(state: &AppState, target: Target, session: Session, remember: bool) -> Res<()> {
     let latest = xkyhold_app::latest_of_this_computer(&session.repo)?;
@@ -257,6 +274,7 @@ fn adopt(state: &AppState, target: Target, session: Session, remember: bool) -> 
         s.repo_id = Some(session.repo.config.repo_id.clone());
         Ok(())
     })?;
+    sync_timer();
     if remember && let Err(e) = xkyhold_app::remember_key(&session.repo, true) {
         // The backup works without it; the password is asked each time.
         xkyhold_app::log(&format!("could not keep the key in the keyring: {e}"));
@@ -612,10 +630,25 @@ struct SettingsPatch {
     keep_months: Option<u32>,
     language: Option<String>,
     theme: Option<String>,
+    automatic: Option<String>,
+    notify_success: Option<bool>,
 }
 
 #[tauri::command]
 async fn save_settings(patch: SettingsPatch) -> Res<Settings> {
+    if let Some(a) = &patch.automatic
+        && a != "off"
+    {
+        if !["hourly", "daily", "weekly"].contains(&a.as_str()) {
+            return Err(ui("usage", "unknown frequency"));
+        }
+        // Automatic backups run without anyone to type the password.
+        let id = Settings::load()?.repo_id.unwrap_or_default();
+        if !xkyhold_app::key_remembered(&id) {
+            return Err(ui("needs-key", "automatic backups need the key in the keyring"));
+        }
+    }
+    let schedule_changed = patch.automatic.is_some() || patch.remind_days.is_some();
     if let Some(what) = &patch.what {
         // Refuse anything outside home now rather than at the next backup.
         let home = xkyhold_app::home()?;
@@ -624,7 +657,7 @@ async fn save_settings(patch: SettingsPatch) -> Res<Settings> {
             xkyhold_app::inside_home(&home, Path::new(p))?;
         }
     }
-    Ok(Settings::update(|s| {
+    let saved = Settings::update(|s| {
         if let Some(what) = patch.what {
             s.what = what;
         }
@@ -640,8 +673,19 @@ async fn save_settings(patch: SettingsPatch) -> Res<Settings> {
         if let Some(v) = patch.theme {
             s.theme = if ["light", "dark"].contains(&v.as_str()) { v } else { "system".into() };
         }
+        if let Some(v) = patch.automatic {
+            s.automatic = v;
+        }
+        if let Some(v) = patch.notify_success {
+            s.notify_success = v;
+        }
         Ok(())
-    })?)
+    })?;
+    if schedule_changed {
+        let s = saved.clone();
+        blocking(move || Ok(xkyhold_app::schedule::sync_units(&s)?)).await?;
+    }
+    Ok(saved)
 }
 
 #[tauri::command]
@@ -659,9 +703,20 @@ async fn change_password(state: State<'_, AppState>, secret: Secret, new_passwor
 
 #[tauri::command]
 async fn set_remember(state: State<'_, AppState>, remember: bool) -> Res<()> {
-    let guard = state.session()?;
-    let session = guard.as_ref().ok_or_else(|| ui("locked", "the backup is not open"))?;
-    Ok(xkyhold_app::remember_key(&session.repo, remember)?)
+    {
+        let guard = state.session()?;
+        let session = guard.as_ref().ok_or_else(|| ui("locked", "the backup is not open"))?;
+        xkyhold_app::remember_key(&session.repo, remember)?;
+    }
+    // Without the key, automatic backups cannot run: back to reminders.
+    if !remember {
+        Settings::update(|s| {
+            s.automatic = "off".into();
+            Ok(())
+        })?;
+        sync_timer();
+    }
+    Ok(())
 }
 
 /// Removes this computer's settings, the backup's key and the Google
@@ -682,6 +737,7 @@ async fn forget_computer(state: State<'_, AppState>) -> Res<()> {
         *s = Settings { language: s.language.take(), theme: std::mem::take(&mut s.theme), ..Settings::default() };
         Ok(())
     })?;
+    sync_timer();
     *state.session()? = None;
     Ok(())
 }
@@ -791,5 +847,8 @@ pub fn run() {
         probe::start(app.handle());
         Ok(())
     });
+    // Keep the timer pointing at this program (it may have moved or been
+    // updated since the timer was written).
+    std::thread::spawn(sync_timer);
     builder.run(tauri::generate_context!()).expect("error while running XkyHold-lx");
 }
