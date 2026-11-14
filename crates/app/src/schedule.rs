@@ -365,6 +365,8 @@ pub fn sync_units(s: &Settings) -> Result<()> {
             let _ = std::fs::remove_file(&service_path);
             let _ = std::fs::remove_file(&timer_path);
             let _ = systemctl(&["daemon-reload"]);
+            // Otherwise the manager lists the removed timer as failed.
+            let _ = systemctl(&["reset-failed", TIMER, SERVICE]);
         }
         return Ok(());
     }

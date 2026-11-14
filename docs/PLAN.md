@@ -1,6 +1,6 @@
 # XkyHold-lx — plano base
 
-Data: 13/11/2026 · Estado: **Fases 0 a 4 concluídas (motor, CLI, Google Drive e janela, 14/11/2026); Fase 5 (cópia automática) a seguir**
+Data: 13/11/2026 · Estado: **Fases 0 a 5 concluídas (motor, CLI, Google Drive, janela e cópia automática, 14/11/2026); Fase 6 (XkyHold web lê v2) a seguir**
 
 A XkyHold-lx é a app de Linux da família XkyHold. Faz cópias de segurança cifradas da pasta pessoal (`$HOME`) inteira, ou de partes dela, incluindo ficheiros ocultos, configurações, chaves, permissões e ligações simbólicas. Existe para resolver o que a XkyHold web não consegue por correr num browser. Segue o mesmo desenho e partilha o formato de repositório.
 
@@ -146,6 +146,7 @@ Mesmos tokens de cor, tipografia, cartão central e componentes de `../xkyhold/s
 - O serviço corre `xkyhold-lx-cli backup` com prioridade baixa (`Nice`, `IOSchedulingClass=idle`). Notificação no fim só em caso de erro ou de ficheiros saltados (configurável).
 - Um lock local (`flock` em `$XDG_RUNTIME_DIR`) impede a janela e o temporizador de copiarem ao mesmo tempo; os locks do repositório continuam a proteger entre computadores.
 - Sem ícone de tabuleiro na primeira versão.
+- **Como ficou (Fase 5):** um único temporizador horário corre o próprio binário da janela com `--scheduled` (sem WebKit), em vez de `xkyhold-lx-cli backup`, porque os pacotes só levam um binário. Em cada passagem decide: cópia automática se estiver em atraso, senão lembrete se estiver em atraso, senão nada. Ver a secção 7.
 
 ### 4.9 Distribuição
 
@@ -280,6 +281,27 @@ Critério da fase:
 Problemas encontrados pela janela e corrigidos: (1) gravações das definições em paralelo perdiam uma delas; (2) uma cópia parada só registava os packs no índice de 8 em 8, e reenviava até cerca de 128 MB; agora regista os que terminaram; (3) os dados do web view da própria app (`~/.local/share/com.xkyriver.xkyhold-lx`) entravam na cópia: passaram para a regra fixa `app-state` (o formato não muda: as regras gravadas na cópia dizem os padrões usados); (4) "manter os dois" chamava `notes.txt (restored)` e perdia a extensão: agora `notes (restored).txt`; (5) a pasta de restauro tinha a hora em UTC; (6) uma pasta com uma cópia ainda sem nenhuma cópia feita não era reconhecida; (7) a verificação não se podia parar; (8) "enviados" somava as cópias anteriores da mesma sessão.
 
 Não testado: sessão Google a expirar a meio pela janela (o caminho existe: faixa com "Entrar de novo"); abrir na janela uma cópia v1 feita pela XkyHold web (só pelo CLI e pelos testes); disco montado dentro da home (sem um nesta máquina de teste); "Imprimir" da chave de recuperação; leitores de ecrã; empacotamento (Fase 7). Nota do teste: o `xdg-open` herda a `HOME` da janela, e o Chromium criou um perfil novo na home temporária; numa home real isto não acontece. Fica no Drive do proprietário a pasta de teste `XkyHold-lx test 3` (cerca de 370 MB).
+
+### Fase 5 (14/11/2026)
+
+**Concluída a 14/11/2026.** Cópias automáticas e lembretes com a janela fechada (secção 4.8), em `crates/app/src/schedule.rs`.
+
+- **Um temporizador, hora a hora:** `xkyhold-lx.timer` (`OnCalendar=hourly`, `Persistent=true`, 5 min aleatórios) e `xkyhold-lx.service` (`Type=oneshot`, `Nice=10`, `IOSchedulingClass=idle`) correm `xkyhold-lx --scheduled`. Cada passagem decide pelas definições: cópia automática quando está em atraso (a cada hora, dia ou semana, com uma pequena folga), senão a notificação de lembrete (no máximo uma por dia), senão nada. Desvio da secção 4.8: corre o binário da janela e não o `xkyhold-lx-cli`, porque os pacotes só levam um binário; com `--scheduled` não arranca o WebKit.
+- **Instalação:** os ficheiros ficam na pasta de configuração da app e são ligados ao systemd (`systemctl --user link`/`enable`); a janela instala-os, atualiza-os e remove-os conforme as definições, e atualiza o caminho do programa no arranque (num AppImage usa o próprio AppImage). Existem enquanto há uma cópia configurada e lembretes ou cópias automáticas ligados; "Remover deste computador" apaga-os.
+- **A cópia automática exige a chave no keyring;** a janela não a deixa ligar sem isso e desliga-a quando a chave é removida.
+- **Notificações (`notify-send`):** só em problemas (no máximo uma por dia; rede em baixo só depois de dois dias sem cópia), ficheiros que não se leram, e êxito se o utilizador pedir. Textos em EN e pt-PT.
+- **Lock local:** `flock` em `$XDG_RUNTIME_DIR/xkyhold-lx.lock`, tomado por qualquer cópia (janela, temporizador, CLI); a segunda recusa com `running-here`. A janela mostra uma cópia a correr noutro processo e atualiza o estado a cada 20 s.
+- Assistente: passo 5 com "lembrar-me" ou "cópia automática todos os dias". Definições: frequência e aviso de êxito.
+
+Critério da fase:
+
+| Critério | Resultado |
+|---|---|
+| Cópia automática vista a correr com a janela fechada | **Visto pelo agente**, numa home de teste em `/var/tmp` com destino numa pasta local: assistente com "cópia automática todos os dias" instalou o temporizador; janela fechada; o serviço fez a cópia sozinho com a chave do keyring. Também vistos: disco desligado → notificação, e a segunda falha seguida não notificou; disco de volta → cópia e problema limpo; lembrete com a cópia automática desligada, sem repetir; com uma cópia automática de 400 MB a correr, a janela mostrou-a, recusou outra e atualizou a última cópia no fim |
+| … e depois de um reinício | **Visto pelo agente**, com o **reinício feito pelo proprietário** às 13:41: o temporizador continuou ativo e a passagem das 14:02:53 fez a cópia (5 ficheiros) sem nenhuma janela aberta |
+| Testado automaticamente | 56 testes: decisão de cada passagem, ficheiros de unidade (caminho com espaços), lock local, o CLI com o lock |
+
+Notas: o temporizador e a chave de teste foram removidos no fim; ao remover, o gestor do systemd guardava o temporizador como "failed": a remoção passou a fazer `reset-failed`. Não confirmado pelo proprietário: se viu as notificações (o `notify-send` não deu erro). Não testado: cópia automática para o Drive (o caminho é o mesmo da janela; precisa do cliente Google compilado no binário, como na release), sistema sem systemd, KWallet, portátil em bateria (a cópia corre na mesma, com prioridade baixa).
 
 ## 8. Questões em aberto
 
