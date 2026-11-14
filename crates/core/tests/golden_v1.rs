@@ -13,7 +13,8 @@ use xkyhold_core::bytes::{from_base64, sha256_hex};
 use xkyhold_core::crypto::{Credential, RepoConfig, unlock};
 use xkyhold_core::destination::{Destination, Dir, MemoryDestination};
 use xkyhold_core::pack::{BlobEntry, BlobType, read_blob, read_pack_header};
-use xkyhold_core::repo::{Repository, TreeEntry};
+use xkyhold_core::repo::{Options, Repository};
+use xkyhold_core::tree::EntryKind;
 use zeroize::Zeroizing;
 
 fn fixture(name: &str) -> Value {
@@ -122,13 +123,15 @@ fn flatten<D: Destination>(
         out.insert(prefix.to_owned(), None);
     }
     for entry in entries {
-        match entry {
-            TreeEntry::File { name, content, size, .. } => {
+        let name = entry.display_name();
+        match entry.kind {
+            EntryKind::File { content, size } => {
                 let data: Vec<u8> = content.iter().flat_map(|id| repo.load_blob(BlobType::Data, id).unwrap()).collect();
                 assert_eq!(data.len() as u64, size);
                 out.insert(format!("{prefix}{name}"), Some(data));
             }
-            TreeEntry::Dir { name, subtree } => flatten(repo, &subtree, &format!("{prefix}{name}/"), out),
+            EntryKind::Dir { subtree, .. } => flatten(repo, &subtree, &format!("{prefix}{name}/"), out),
+            other => panic!("unexpected entry {other:?}"),
         }
     }
 }
@@ -137,7 +140,8 @@ fn flatten<D: Destination>(
 fn restores_every_file_of_the_golden_repository() {
     let golden = fixture("golden-v1-repo.json");
     for (name, credential) in credentials(&golden) {
-        let repo = Repository::open(load_repo(&golden), &credential).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let repo = Repository::open(load_repo(&golden), &credential, Options::default())
+            .unwrap_or_else(|e| panic!("{name}: {e}"));
         let snapshots = repo.list_snapshots().unwrap();
         assert_eq!(snapshots.len(), 1);
         let snapshot = &snapshots[0];
@@ -145,6 +149,8 @@ fn restores_every_file_of_the_golden_repository() {
         assert_eq!(snapshot.time, "2026-11-11T15:00:00.000Z");
         assert_eq!(snapshot.device, "golden");
         assert_eq!(snapshot.parent, None);
+        assert_eq!(snapshot.version(), 1);
+        assert!(!repo.writable(), "version 1 repositories are read-only here");
         assert_eq!((snapshot.stats.files, snapshot.stats.bytes, snapshot.stats.skipped), (4, 3711, 0));
 
         let mut files = BTreeMap::new();

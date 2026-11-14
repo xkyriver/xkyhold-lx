@@ -16,6 +16,7 @@ aes-gcm = "0.11"
 argon2 = "0.6"
 base64 = "0.23"
 flate2 = "1"
+getrandom = "0.4"
 hex = "0.4"
 hkdf = "0.13"
 hmac = "0.13"
@@ -25,6 +26,10 @@ sha2 = "0.11"
 thiserror = "2"
 unicode-normalization = "0.1"
 zeroize = { version = "1", features = ["derive"] }
+rustix = { version = "1", features = ["fs", "process"] }
+uzers = "0.12"
+tempfile = "3"
+clap = { version = "4", features = ["derive"] }
 
 [workspace.lints.rust]
 unsafe_code = "deny"

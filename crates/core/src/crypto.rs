@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
-use crate::bytes::{from_base32_groups, from_base64};
+use crate::bytes::{from_base32_groups, from_base64, to_base32_groups, to_base64};
 use crate::{Error, Result};
 
 pub const NONCE_LENGTH: usize = 12;
@@ -19,7 +19,10 @@ pub const KEY_LENGTH: usize = 32;
 pub const SEAL_OVERHEAD: usize = NONCE_LENGTH + TAG_LENGTH;
 
 /// Formats this engine can read.
-pub const READABLE_FORMATS: &[u32] = &[1];
+pub const READABLE_FORMATS: &[u32] = &[1, 2];
+/// The only format this engine writes into (FORMAT-v2.md, section 7).
+pub const WRITE_FORMAT: u32 = 2;
+pub const CHUNK_SIZE: u64 = 4 * 1024 * 1024;
 
 /// The working keys of an unlocked repository. Wiped on drop.
 #[derive(Zeroize, ZeroizeOnDrop)]
@@ -47,13 +50,32 @@ impl RepoKeys {
         hex::encode(mac.finalize().into_bytes())
     }
 
-    pub fn seal(&self, plaintext: &[u8], aad: &str, nonce: &[u8; NONCE_LENGTH]) -> Vec<u8> {
-        seal(&self.enc_key, plaintext, aad, nonce)
+    /// Encrypts with a fresh random nonce.
+    pub fn seal(&self, plaintext: &[u8], aad: &str) -> Vec<u8> {
+        seal(&self.enc_key, plaintext, aad, &random_array())
     }
 
     pub fn open(&self, sealed: &[u8], aad: &str) -> Result<Vec<u8>> {
         open(&self.enc_key, sealed, aad)
     }
+}
+
+/// Bytes from the operating system's random generator.
+pub fn random_bytes(n: usize) -> Vec<u8> {
+    let mut out = vec![0u8; n];
+    getrandom::fill(&mut out).expect("the system random generator is available");
+    out
+}
+
+pub fn random_array<const N: usize>() -> [u8; N] {
+    let mut out = [0u8; N];
+    getrandom::fill(&mut out).expect("the system random generator is available");
+    out
+}
+
+/// 16 random bytes as hex: repository, snapshot and lock ids.
+pub fn random_id() -> String {
+    hex::encode(random_array::<16>())
 }
 
 fn hkdf_sha256(ikm: &[u8], info: &str) -> [u8; KEY_LENGTH] {
@@ -216,4 +238,68 @@ pub fn unwrap_master_key(config: &RepoConfig, credential: &Credential) -> Result
 pub fn unlock(config: &RepoConfig, credential: &Credential) -> Result<RepoKeys> {
     let master = unwrap_master_key(config, credential)?;
     Ok(RepoKeys::derive(&master, &config.repo_id))
+}
+
+fn password_slot(password: &str, master: &[u8], repo_id: &str, params: Argon2Params) -> Result<KeySlot> {
+    let salt = random_bytes(32);
+    let kek = password_kek(password, &salt, &params)?;
+    Ok(KeySlot::Known(KnownSlot::Password {
+        kdf: "argon2id".into(),
+        params,
+        salt: to_base64(&salt),
+        wrapped_master_key: to_base64(&seal(&kek, master, &key_aad(repo_id), &random_array())),
+    }))
+}
+
+/// A new repository: its `config`, its working keys and the recovery key
+/// (shown to the user once, never stored).
+pub struct NewRepository {
+    pub config: RepoConfig,
+    pub keys: RepoKeys,
+    pub recovery_key: Zeroizing<String>,
+}
+
+/// Creates the keys and `config` of a new format 2 repository.
+pub fn create_repository(password: &str, params: Argon2Params, created: String) -> Result<NewRepository> {
+    let repo_id = random_id();
+    let master = Zeroizing::new(random_bytes(KEY_LENGTH));
+    let recovery = Zeroizing::new(random_bytes(KEY_LENGTH));
+    let config = RepoConfig {
+        format: WRITE_FORMAT,
+        repo_id: repo_id.clone(),
+        created,
+        chunker: Chunker { kind: "fixed".into(), size: CHUNK_SIZE },
+        keys: vec![
+            password_slot(password, &master, &repo_id, params)?,
+            KeySlot::Known(KnownSlot::Recovery {
+                kdf: "hkdf-sha256".into(),
+                wrapped_master_key: to_base64(&seal(
+                    &recovery_kek(&recovery, &repo_id),
+                    &master,
+                    &key_aad(&repo_id),
+                    &random_array(),
+                )),
+            }),
+        ],
+    };
+    Ok(NewRepository {
+        keys: RepoKeys::derive(&master, &repo_id),
+        recovery_key: Zeroizing::new(to_base32_groups(&recovery)),
+        config,
+    })
+}
+
+/// Returns `config` with a new password. `credential` is the current
+/// password, or the recovery key when the password was forgotten. The
+/// recovery slot, unknown slots and all data are untouched.
+pub fn change_password(
+    config: &RepoConfig,
+    credential: &Credential,
+    new_password: &str,
+    params: Argon2Params,
+) -> Result<RepoConfig> {
+    let master = unwrap_master_key(config, credential)?;
+    let mut keys = vec![password_slot(new_password, &master, &config.repo_id, params)?];
+    keys.extend(config.keys.iter().filter(|k| !matches!(k, KeySlot::Known(KnownSlot::Password { .. }))).cloned());
+    Ok(RepoConfig { keys, ..config.clone() })
 }

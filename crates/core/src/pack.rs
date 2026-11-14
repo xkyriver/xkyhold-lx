@@ -15,7 +15,7 @@ pub const PACK_TARGET_SIZE: usize = 16 * 1024 * 1024;
 pub const ENCODING_RAW: u32 = 0;
 pub const ENCODING_DEFLATE: u32 = 1;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum BlobType {
     Data,
@@ -97,5 +97,61 @@ pub fn encode_body(kind: BlobType, plaintext: &[u8]) -> (u32, Vec<u8>) {
     match kind {
         BlobType::Tree => (ENCODING_DEFLATE, deflate(plaintext)),
         BlobType::Data => (ENCODING_RAW, plaintext.to_vec()),
+    }
+}
+
+/// A pack being filled with encrypted blobs.
+pub struct PackWriter {
+    bytes: Vec<u8>,
+    blobs: Vec<BlobEntry>,
+}
+
+/// A closed pack, ready to upload under `name`.
+pub struct FinishedPack {
+    /// Hex SHA-256 of `bytes`: the pack's name in the destination.
+    pub name: String,
+    pub bytes: Vec<u8>,
+    pub blobs: Vec<BlobEntry>,
+}
+
+impl Default for PackWriter {
+    fn default() -> Self {
+        Self { bytes: MAGIC.to_vec(), blobs: Vec::new() }
+    }
+}
+
+impl PackWriter {
+    /// Bytes written so far.
+    pub fn size(&self) -> usize {
+        self.bytes.len()
+    }
+
+    pub fn count(&self) -> usize {
+        self.blobs.len()
+    }
+
+    /// Encrypts a blob into the pack. `id` is its HMAC, computed by the caller.
+    pub fn add(&mut self, keys: &RepoKeys, kind: BlobType, id: &str, plaintext: &[u8]) -> BlobEntry {
+        let (encoding, body) = encode_body(kind, plaintext);
+        let sealed = keys.seal(&body, &blob_aad(kind, id));
+        let entry = BlobEntry {
+            id: id.to_owned(),
+            kind,
+            offset: self.bytes.len() as u64,
+            length: sealed.len() as u64,
+            raw_length: plaintext.len() as u64,
+            encoding,
+        };
+        self.bytes.extend_from_slice(&sealed);
+        self.blobs.push(entry.clone());
+        entry
+    }
+
+    pub fn finish(mut self, keys: &RepoKeys) -> FinishedPack {
+        let header = serde_json::to_vec(&Header { blobs: self.blobs.clone() }).expect("serializable");
+        let sealed = keys.seal(&deflate(&header), HEADER_AAD);
+        self.bytes.extend_from_slice(&sealed);
+        self.bytes.extend_from_slice(&(sealed.len() as u32).to_le_bytes());
+        FinishedPack { name: crate::bytes::sha256_hex(&self.bytes), bytes: self.bytes, blobs: self.blobs }
     }
 }
