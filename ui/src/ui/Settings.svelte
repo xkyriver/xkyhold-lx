@@ -1,7 +1,7 @@
 <script lang="ts">
   import { api } from '../lib/api'
   import type { Settings } from '../lib/api'
-  import { LANGUAGES, t } from '../lib/i18n.svelte'
+  import { formatWhen, LANGUAGES, t } from '../lib/i18n.svelte'
   import { KEEP_CHOICES, REMINDER_CHOICES } from '../lib/reminder'
   import { app, checkBackup, explain, refresh, saveSettings, signIn, stopJob } from '../state/app.svelte'
   import What from './What.svelte'
@@ -141,6 +141,11 @@
       <button class="link small" onclick={stopJob}>{t('Stop')}</button>
     {/if}
   </div>
+  {#if app.lastCheck && app.job?.kind !== 'check'}
+    <div class="banner {app.lastCheck.ok ? 'ok' : 'warn'}" role="status">
+      <span>{formatWhen(app.lastCheck.time)}: {app.lastCheck.text}</span>
+    </div>
+  {/if}
 </section>
 
 <section class="card stack">

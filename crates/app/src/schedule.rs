@@ -244,7 +244,12 @@ pub fn run_scheduled() -> Result<()> {
     match due(&s, now) {
         Due::Nothing => Ok(()),
         Due::Remind => {
-            remind(&s, now);
+            // Right after setting up there is no backup yet, and the user is
+            // about to make one: start counting instead of reminding now.
+            let just_set_up = s.last_backup.is_none() && s.last_reminded.is_none();
+            if !just_set_up {
+                remind(&s, now);
+            }
             let stamp = iso(now);
             Settings::update(|s| {
                 s.last_reminded = Some(stamp);

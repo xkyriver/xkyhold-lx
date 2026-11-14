@@ -37,6 +37,8 @@ export const app = $state({
   signinUrl: null as string | null,
   /** Bumped after each backup, restore or check, for screens to reload. */
   generation: 0,
+  /** The result of the last check, also shown next to the Check buttons. */
+  lastCheck: null as { ok: boolean; text: string; time: string } | null,
 })
 
 export const settings = (): Settings | undefined => app.status?.settings
@@ -225,6 +227,7 @@ function finished(done: JobDone): void {
   if (app.closing) void api.closeNow()
   if (!done.ok) {
     fail(done.error)
+    if (done.kind === 'check') app.lastCheck = { ok: false, text: app.error ?? '', time: new Date().toISOString() }
     void refresh()
     return
   }
@@ -252,8 +255,10 @@ function finished(done: JobDone): void {
     app.noticeFolder = typeof s.folder === 'string' ? s.folder : null
   } else if (s.ok) {
     app.notice = t('Your backup is complete and intact: {n} pieces of data checked.', { n: num(s.blobs).toLocaleString() })
+    app.lastCheck = { ok: true, text: app.notice, time: new Date().toISOString() }
   } else {
     app.error = t('Part of this backup is damaged or missing. Make a new backup now so that your files are saved again.')
+    app.lastCheck = { ok: false, text: app.error, time: new Date().toISOString() }
   }
   void refresh()
 }
