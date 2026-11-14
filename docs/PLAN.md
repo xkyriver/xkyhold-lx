@@ -1,6 +1,6 @@
 # XkyHold-lx — plano base
 
-Data: 13/11/2026 · Estado: **Fase 0 concluída; Fase 1 em rascunho, à espera da revisão do proprietário**
+Data: 13/11/2026 · Estado: **Fases 0 e 1 concluídas (formato v2 aprovado a 14/11/2026); Fase 2 (motor) a começar**
 
 A XkyHold-lx é a app de Linux da família XkyHold. Faz cópias de segurança cifradas da pasta pessoal (`$HOME`) inteira, ou de partes dela, incluindo ficheiros ocultos, configurações, chaves, permissões e ligações simbólicas. Existe para resolver o que a XkyHold web não consegue por correr num browser. Segue o mesmo desenho e partilha o formato de repositório.
 
@@ -201,12 +201,13 @@ Os três riscos:
 
 Achado para a Fase 1: a XkyHold web 1.0, ao reabrir um backup que o browser já conhece (chaves guardadas no IndexedDB), não volta a ler o `config` e por isso não verifica o `format`. Se um repositório v1 passar a v2, um separador antigo leria trees v2 como v1. A especificação resolve isto selando os snapshots v2 com outro AAD (secção 3.2 do rascunho).
 
-### Fase 1 (13/11/2026, rascunho)
+### Fase 1 (13–14/11/2026)
 
 - Rascunho da especificação v2 em `docs/FORMAT-v2.md` do repositório `xkyhold`, no ramo local `format-v2-spec` (sem push, sem deploy). **À espera da revisão do proprietário**; nenhum código depende dela ainda.
 - Propostas no rascunho para as questões em aberto 3 e 4: ligações físicas guardadas como ficheiros separados (o conteúdo já é deduplicado; a relação pode vir depois sem versão nova); um repositório v1 só passa a v2 com o acordo do utilizador e só depois de a XkyHold web com leitura v2 estar publicada (alternativa: a lx só escreve em repositórios criados por ela).
 - 14/11/2026: revisão do proprietário (transmitida pela sessão do plano base, com o "Sim, envia" dele) aplicada ao rascunho, commit no ramo `format-v2-spec`: o restauro nunca muda o dono e só repõe o grupo quando quem restaura pertence a ele (nomes têm prioridade sobre números); questão 4 decidida (ver secção 8); a web só restaura de repositórios v2 e nenhum escritor da primeira versão põe snapshots v1 num repositório v2; pontos de montagem não atravessados guardados como pastas vazias, com contador; dito o que não se guarda (buracos de ficheiros esparsos, atributos do `chattr`, data de criação); vetores de teste com uma data anterior a 1970, dois nomes inválidos com a mesma forma visível e uma ACL POSIX. Mantidos: o esquema de AAD da secção 3.2 (verificado contra o código da web), o campo `change`, as ligações físicas como ficheiros e a divisão `mtime` + `mtimeNanos`. **A especificação continua por aprovar.**
 - 14/11/2026: a pedido do proprietário ("concordo com a tua opinião", via a sessão do plano base), campo opcional `leftOut` por raiz do snapshot v2 com as **regras** de exclusão em vigor nessa cópia (omissões, sugestões ligadas, pastas desmarcadas, padrões, pontos de montagem atravessados), não a lista de caminhos; só para mostrar. Commit `fc86104` no ramo `format-v2-spec`. **A especificação continua por aprovar.**
+- **Fase 1 concluída a 14/11/2026: especificação v2 aprovada pelo proprietário** ("Aprovo") e marcada como congelada (commit `1c4ded6` no ramo `format-v2-spec` do `xkyhold`; o `FORMAT.md` passou a apontar para o `FORMAT-v2.md`). O ramo continua só local: juntá-lo ao `main` e fazer push no repositório público `xkyhold` precisa do "sim" do proprietário. O `golden-v2-repo.json` é escrito uma vez na Fase 2 e congelado.
 
 ## 8. Questões em aberto
 
