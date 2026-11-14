@@ -10,7 +10,9 @@ XkyHold-lx backs up everything inside `$HOME` — hidden files, `~/.config`,
 it to where it came from or to another folder. Backups are encrypted on your
 computer before they leave it; nobody else, Google included, can read them.
 
-**Status:** in development. Nothing is released yet.
+**Status:** 1.0.0. Download the AppImage, `.deb` or `.rpm` from the
+[releases](https://github.com/xkyriver/xkyhold-lx/releases); how to install:
+<https://xkyhold.xkyriver.com/linux/>.
 
 ## Scope
 

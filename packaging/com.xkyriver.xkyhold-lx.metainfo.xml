@@ -44,6 +44,14 @@
     <keyword>encryption</keyword>
   </keywords>
   <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="1.0.0" date="2026-11-14">
+      <description>
+        <p>First release.</p>
+        <p xml:lang="pt-PT">Primeira versão.</p>
+      </description>
+    </release>
+  </releases>
   <provides>
     <binary>xkyhold-lx</binary>
   </provides>
