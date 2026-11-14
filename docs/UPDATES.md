@@ -111,7 +111,7 @@ Um script `scripts/release` que, a partir dos pacotes compilados: calcula o `SHA
 | Fase | Conteúdo | Feito quando |
 |---|---|---|
 | **U0. Confirmar** (feito a 15/11/2026, secção 7) | Ler a documentação atual do `tauri-plugin-updater` para Linux e do `pkexec` com `apt-get`/`dnf`; confirmar que o `rename` sobre um AppImage em execução funciona e que o reinício arranca a versão nova | Respostas escritas neste ficheiro; 4.5 confirmada ou revista |
-| **U1. Web** | `version.json`, verificação, faixa, textos EN e pt-PT, testes (repositório `xkyhold`) | Visto no browser com dois builds seguidos; **deploy pelo proprietário** |
+| **U1. Web** (feita a 15/11/2026, secção 9) | `version.json`, verificação, faixa, textos EN e pt-PT, testes (repositório `xkyhold`) | Visto no browser com dois builds seguidos; **deploy pelo proprietário** |
 | **U2. lx: avisar** | `latest.json`, procura diária, faixa no Início, Definições → Acerca, textos; botão a abrir a página da versão em todos os casos | Uma lx de teste com versão baixa mostra a faixa a partir de um `latest.json` de teste servido em `localhost` (endereço alternativo só em builds de desenvolvimento) |
 | **U3. lx: assinar** | Chave (passo do proprietário), `scripts/release`, verificação de assinatura com testes: assinatura errada, ficheiro truncado, versão mais antiga, `latest.json` alterado | Tudo recusado nos testes; um pacote bem assinado aceite |
 | **U4. lx: AppImage** | Atualização no lugar, AppMan incluído, reinício, temporizador | Visto no computador do proprietário: de uma versão N de teste para N+1, com a cópia automática a correr bem depois |
@@ -132,3 +132,8 @@ A fase U1 (web) não depende das outras e pode ir primeiro. U2 já dá valor soz
 - **Formato do repositório:** uma versão nova nunca pode deixar de ler os repositórios das anteriores (já é regra do `FORMAT.md`); o atualizador não muda isso, mas torna as atualizações mais frequentes.
 - **`.deb`/`.rpm` sem máquina de teste:** hoje os pacotes nunca foram instalados num Debian ou Fedora reais. A fase U5 precisa dessa prova antes de o botão instalar.
 - **Chave privada:** se for comprometida, quem a tiver consegue distribuir uma versão falsa a quem carregar em "Atualizar". Fica só com o proprietário e com palavra-passe.
+
+## 9. Registo
+
+- **U1 (web) feita a 15/11/2026**, commit `951c53d` no `xkyhold` (só local; o push e o deploy são do proprietário). O build escreve `version.json` com a versão e o commit (`git rev-parse --short=12 HEAD`), servido com `no-store`; a faixa fica no topo da app (também no assistente), com **Atualizar** desativado durante uma cópia, restauro ou verificação. Testes: `src/lib/update.test.ts` (4) e o dicionário pt-PT; 173 testes a passar. **Visto** no `vite preview`: separador aberto no build `498a6f18cdc0` sem faixa; depois do build `951c53db5f95` servido no mesmo sítio, a faixa apareceu; "Atualizar" recarregou para o código novo e a faixa desapareceu. Não visto: o botão desativado durante uma cópia, e o caso `vite:preloadError`. Nota: dois builds do mesmo commit têm o mesmo identificador, por isso um deploy de alterações por fazer commit não é anunciado; os deploys saem de commits.
+
