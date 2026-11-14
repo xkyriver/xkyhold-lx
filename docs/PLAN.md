@@ -341,6 +341,20 @@ Feita pelo proprietário na janela release (cliente Google embutido, sem a sonda
 
 Encontrado e corrigido (`87743d1`): (1) logo a seguir ao assistente o temporizador mostrava um lembrete de "ainda não fizeste cópia" (o arranque `--now` de um temporizador com `Persistent=true` e registo antigo); agora a primeira passagem sem cópia só começa a contar; (2) o resultado da verificação aparecia só na faixa do topo, fora da vista; agora aparece também no cartão. Falta da Fase 7: a prova no Drive com a outra conta Google do proprietário, um restauro num utilizador ou máquina limpos, os pacotes, a página e a release.
 
+### Fase 7: prova real no Google Drive (14/11/2026)
+
+Feita pelo proprietário na janela release, com a outra conta Google (Google Workspace: o administrador teve de permitir o cliente com o âmbito `drive.file`), sobre a home real, no repositório novo `XkyHold/pulsar-omarchy-xriver`. Deixou de fora o mesmo que no disco.
+
+| Passo | Resultado |
+|---|---|
+| Cópia | 233 236 ficheiros, 26,2 GB, começou às 18:16:16 e acabou em menos de 42 min; 21 GB enviados (≥ ~8 MB/s); nenhum ficheiro saltado |
+| Verificação rápida | Antes da correção, mais de 10 min sem acabar (um pedido por árvore, 28 000 pastas); depois de `0002125`, 35 s, e as seguintes vêm da cache local |
+| Restauro completo | Para `XKYOS/XkyHold-lx-proof/2026-11-14 18.16`, das 19:42 às ~20:43 (cerca de 60 min para 26 GB, ~8 MB/s, a velocidade da ligação). Antes de `63b0896` ia a ~5 ficheiros/s (um pedido por bloco) |
+| Comparação restauro → home (só leitura) | **0 problemas**: 232 557 ficheiros, 28 089 pastas, 1268 ligações iguais (SHA-256, tamanho, permissões, `mtime` ao ns, `user.*`, ACL). 197 ficheiros alterados e 681 apagados depois das 18:16 (a comparação correu mais de 2,5 h depois da cópia; estado de programas em uso) |
+| Comparação home → restauro | Nada falta sem razão: 730 itens novos desde a cópia, 126 ficheiros especiais, 3 pastas com `CACHEDIR.TAG` |
+
+Encontrado e corrigido durante a prova: (1) `a93877d`: o login Google abriu no navegador errado e o assistente ficou preso sem "Voltar"; agora há "Cancelar" enquanto espera pela Google; (2) `0002125`: as árvores passam a ser lidas em packs inteiros e guardadas em cache local (`XDG_CACHE_HOME/xkyhold-lx/<repo_id>/trees`, verificadas pelo SHA-256 do nome); os tamanhos na janela passam a unidades decimais (a janela dizia 24 GB e o CLI 26,2 GB); (3) `63b0896`: num restauro grande, um pack de dados passa a ser lido inteiro à terceira leitura parcial (até 24 em memória); restaurar um ficheiro pequeno continua a ler só o seu pedaço. Falta da Fase 7: um restauro num utilizador ou máquina limpos, os pacotes, a página e a release.
+
 ## 8. Questões em aberto
 
 1. ~~Repositório GitHub~~: **decidido pelo proprietário a 14/11/2026:** privado desde já (com o "sim" dele no momento de o criar), público na release v1.0.0.
