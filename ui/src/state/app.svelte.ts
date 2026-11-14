@@ -154,12 +154,16 @@ export async function signIn(): Promise<boolean> {
     if (app.status?.configured && !app.status.open) await openBackup()
     return true
   } catch (err) {
-    fail(err)
+    // Cancelled by the user: nothing to explain.
+    if (errorKind(err) !== 'aborted') fail(err)
     return false
   } finally {
     app.signinUrl = null
   }
 }
+
+/** Stops waiting for the browser to come back from Google. */
+export const cancelSignIn = (): Promise<void> => api.cancelSignIn()
 
 export async function saveSettings(patch: Parameters<typeof api.saveSettings>[0]): Promise<void> {
   try {

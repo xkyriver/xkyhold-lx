@@ -6,6 +6,7 @@
 
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -109,6 +110,17 @@ pub struct SignedIn {
 /// (to open it, or to print it); the call waits for the browser to come
 /// back to 127.0.0.1, with no time limit.
 pub fn sign_in(http: &dyn Http, client: &Client, show: &mut dyn FnMut(&str)) -> Result<SignedIn> {
+    sign_in_until(http, client, show, &AtomicBool::new(false))
+}
+
+/// [`sign_in`] that gives up with [`Error::Aborted`] once `cancel` is set
+/// (the window's Cancel: the browser may never come back).
+pub fn sign_in_until(
+    http: &dyn Http,
+    client: &Client,
+    show: &mut dyn FnMut(&str),
+    cancel: &AtomicBool,
+) -> Result<SignedIn> {
     let verifier = random_b64(32);
     let challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()));
     let state = random_b64(16);
@@ -122,8 +134,20 @@ pub fn sign_in(http: &dyn Http, client: &Client, show: &mut dyn FnMut(&str)) -> 
         enc(SCOPE),
     );
     show(&url);
+    listener.set_nonblocking(true)?;
     loop {
-        let (mut stream, _) = listener.accept()?;
+        let mut stream = match listener.accept() {
+            Ok((stream, _)) => stream,
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                if cancel.load(Ordering::Relaxed) {
+                    return Err(Error::Aborted);
+                }
+                std::thread::sleep(Duration::from_millis(200));
+                continue;
+            }
+            Err(e) => return Err(e.into()),
+        };
+        stream.set_nonblocking(false)?;
         let mut line = String::new();
         BufReader::new(&stream).read_line(&mut line)?;
         let query = line.split_whitespace().nth(1).and_then(|p| p.split_once('?')).map(|(_, q)| q).unwrap_or("");
@@ -226,5 +250,22 @@ mod tests {
         assert_eq!(param("a=1&code=4%2F0Ab%2Bc&state=x", "code").as_deref(), Some("4/0Ab+c"));
         assert_eq!(param("a=1", "code"), None);
         assert_eq!(enc("a b/c"), "a%20b%2Fc");
+    }
+
+    /// The window's Cancel: a browser that never comes back does not keep
+    /// the sign-in waiting. No request reaches Google.
+    #[test]
+    fn a_sign_in_can_be_cancelled() {
+        let cancel = std::sync::Arc::new(AtomicBool::new(false));
+        let stop = cancel.clone();
+        let client = Client { id: "id".into(), secret: "secret".into() };
+        let started = Instant::now();
+        let waiter = std::thread::spawn(move || {
+            sign_in_until(&crate::http::Ureq::default(), &client, &mut |_| {}, &cancel).map(|_| ())
+        });
+        std::thread::sleep(Duration::from_millis(300));
+        stop.store(true, Ordering::Relaxed);
+        assert!(matches!(waiter.join().unwrap(), Err(Error::Aborted)));
+        assert!(started.elapsed() < Duration::from_secs(5));
     }
 }

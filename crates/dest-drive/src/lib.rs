@@ -11,7 +11,7 @@ pub mod http;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
-pub use crate::auth::{Client, RefreshingTokens, SignedIn, Tokens, sign_in};
+pub use crate::auth::{Client, RefreshingTokens, SignedIn, Tokens, sign_in, sign_in_until};
 pub use crate::http::{Http, Ureq};
 
 use xkyhold_core::destination::{Destination, Dir, StoredObject};

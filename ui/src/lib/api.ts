@@ -109,6 +109,7 @@ export const api = {
   openSaved: () => invoke<boolean>('open_saved'),
   signIn: () => invoke<string>('sign_in'),
   signOut: () => invoke<void>('sign_out'),
+  cancelSignIn: () => invoke<void>('cancel_sign_in'),
   driveBackups: () => invoke<string[]>('drive_backups'),
   inspectFolder: (path: string) => invoke<FolderState>('inspect_folder', { path }),
   pickFolder: () => invoke<string | null>('pick_folder'),

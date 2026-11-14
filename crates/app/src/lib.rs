@@ -104,9 +104,14 @@ pub fn drive_client(settings: &Settings, limit_kb: Option<u64>) -> Result<Drive>
 /// keyring and returns the account's email address. `show` gets the
 /// sign-in address (to open it, or to print it).
 pub fn google_sign_in(show: &mut dyn FnMut(&str)) -> Result<String> {
+    google_sign_in_until(show, &AtomicBool::new(false))
+}
+
+/// [`google_sign_in`] that stops waiting for the browser once `cancel` is set.
+pub fn google_sign_in_until(show: &mut dyn FnMut(&str), cancel: &AtomicBool) -> Result<String> {
     let client = client()?;
     let http = Ureq::default();
-    let signed = xkyhold_dest_drive::sign_in(&http, &client, show)?;
+    let signed = xkyhold_dest_drive::sign_in_until(&http, &client, show, cancel)?;
     let http: Arc<dyn Http> = Arc::new(http);
     let tokens = Arc::new(RefreshingTokens::new(http.clone(), client, signed.refresh.clone()));
     let account = Drive::new(http, tokens).about_email()?;

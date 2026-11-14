@@ -6,7 +6,7 @@
   import type { FolderState, Target, What } from '../lib/api'
   import { t } from '../lib/i18n.svelte'
   import { REMINDER_CHOICES } from '../lib/reminder'
-  import { app, explain, errorKind, refresh, saveSettings, signIn } from '../state/app.svelte'
+  import { app, cancelSignIn, explain, errorKind, refresh, saveSettings, signIn } from '../state/app.svelte'
   import type { View } from '../state/app.svelte'
   import What_ from './What.svelte'
 
@@ -201,7 +201,14 @@
         <span class="url">{app.signinUrl}</span>
       </p>
     {/if}
-    <div class="row"><button class="btn" onclick={() => (step = 'where')} disabled={busy}>{t('Back')}</button></div>
+    <div class="row">
+      {#if busy}
+        <!-- The browser may never come back: the wrong one opened, or it was closed. -->
+        <button class="btn" onclick={cancelSignIn}>{t('Cancel')}</button>
+      {:else}
+        <button class="btn" onclick={() => (step = 'where')}>{t('Back')}</button>
+      {/if}
+    </div>
   {:else if step === 'choose'}
     <h1>{t('Your backup')}</h1>
     {#if existing === null}

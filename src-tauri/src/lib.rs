@@ -75,6 +75,8 @@ struct AppState {
     job: Mutex<Option<&'static str>>,
     cancel: Arc<AtomicBool>,
     scan_cancel: Mutex<Arc<AtomicBool>>,
+    /// Stops waiting for the browser during a Google sign-in.
+    signin_cancel: Mutex<Arc<AtomicBool>>,
 }
 
 impl AppState {
@@ -158,14 +160,19 @@ async fn open_saved(state: State<'_, AppState>) -> Res<bool> {
 }
 
 #[tauri::command]
-async fn sign_in(app: AppHandle) -> Res<String> {
+async fn sign_in(app: AppHandle, state: State<'_, AppState>) -> Res<String> {
+    let cancel = Arc::new(AtomicBool::new(false));
+    *state.signin_cancel.lock().unwrap() = cancel.clone();
     blocking(move || {
-        let account = xkyhold_app::google_sign_in(&mut |url| {
-            let _ = app.emit("signin-url", url);
-            if std::process::Command::new("xdg-open").arg(url).spawn().is_err() {
-                xkyhold_app::log("xdg-open failed; the window shows the sign-in address");
-            }
-        })?;
+        let account = xkyhold_app::google_sign_in_until(
+            &mut |url| {
+                let _ = app.emit("signin-url", url);
+                if std::process::Command::new("xdg-open").arg(url).spawn().is_err() {
+                    xkyhold_app::log("xdg-open failed; the window shows the sign-in address");
+                }
+            },
+            &cancel,
+        )?;
         Settings::update(|s| {
             s.account = Some(account.clone());
             Ok(())
@@ -439,6 +446,12 @@ async fn backup_now(app: AppHandle, state: State<'_, AppState>) -> Res<()> {
             "forgotten": done.forgotten, "cleanup_failed": done.cleanup_error.is_some(),
         }))
     })
+}
+
+/// The browser may never come back (closed, or the wrong one opened).
+#[tauri::command]
+fn cancel_sign_in(state: State<'_, AppState>) {
+    state.signin_cancel.lock().unwrap().store(true, Ordering::Relaxed);
 }
 
 #[tauri::command]
@@ -836,6 +849,7 @@ pub fn run() {
             open_saved,
             sign_in,
             sign_out,
+            cancel_sign_in,
             drive_backups,
             inspect_folder,
             pick_folder,
