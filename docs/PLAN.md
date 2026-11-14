@@ -1,6 +1,6 @@
 # XkyHold-lx — plano base
 
-Data: 13/11/2026 · Estado: **Fases 0 a 5 concluídas (motor, CLI, Google Drive, janela e cópia automática, 14/11/2026); Fase 6 (XkyHold web lê v2) a seguir**
+Data: 13/11/2026 · Estado: **Fases 0 a 6 concluídas (motor, CLI, Google Drive, janela, cópia automática e leitura v2 na web, 14/11/2026); Fase 7 (prova real e release) a seguir. O deploy da web é do proprietário e tem de vir antes da release**
 
 A XkyHold-lx é a app de Linux da família XkyHold. Faz cópias de segurança cifradas da pasta pessoal (`$HOME`) inteira, ou de partes dela, incluindo ficheiros ocultos, configurações, chaves, permissões e ligações simbólicas. Existe para resolver o que a XkyHold web não consegue por correr num browser. Segue o mesmo desenho e partilha o formato de repositório.
 
@@ -302,6 +302,23 @@ Critério da fase:
 | Testado automaticamente | 56 testes: decisão de cada passagem, ficheiros de unidade (caminho com espaços), lock local, o CLI com o lock |
 
 Notas: o temporizador e a chave de teste foram removidos no fim; ao remover, o gestor do systemd guardava o temporizador como "failed": a remoção passou a fazer `reset-failed`. Não confirmado pelo proprietário: se viu as notificações (o `notify-send` não deu erro). Não testado: cópia automática para o Drive (o caminho é o mesmo da janela; precisa do cliente Google compilado no binário, como na release), sistema sem systemd, KWallet, portátil em bateria (a cópia corre na mesma, com prioridade baixa).
+
+### Fase 6 (14/11/2026)
+
+**Concluída a 14/11/2026**, no repositório `xkyhold`, ramo `web-reads-v2` (sobre `format-v2-spec`; commits `7dc11cd`, `bd626f2`, `f0e55bc`; nada enviado). Detalhe na secção 14 do `docs/PLAN.md` da XkyHold.
+
+- Motor TS: lê `format` 1 e 2, abre os snapshots com o AAD v2 e depois o v1, confere o `format` do snapshot com o AAD; prune para em tipos desconhecidos. Os repositórios v2 são só de restauro: o motor recusa cópia e mudança de palavra-passe (`read-only`), também quando reabre com as chaves guardadas.
+- Restauro no browser: ligações simbólicas para o `.zip` como ligações e saltadas numa pasta; tipos desconhecidos saltados; nomes que aparecem iguais não se sobrepõem; o aviso diz quantos de cada. O ecrã esconde fazer cópia, lembretes, pastas e palavra-passe.
+- `golden-v2-repo.json` copiado byte a byte (sha256 `bdacbe3d…`) e lido pelo motor TS. 169 testes na web. O `scripts/cross-ts.sh` da lx passou a verificar o que a XkyHold em causa faz: com leitura v2 usa o leitor real, sem ela confirma a recusa; passa contra o ramo novo e contra o `main` da XkyHold.
+
+Critério da fase:
+
+| Critério | Resultado |
+|---|---|
+| Um repositório escrito pela lx abre e restaura na web em pré-visualização local | **Visto pelo agente**, no browser integrado da app do Claude com o **login Google feito pelo proprietário** (o Chrome dele já tinha outra cópia configurada em `localhost:5173`, e ficou intacto): `XkyHold-lx test 3` (feita pela janela da lx) abriu em modo só restauro; Início e Definições sem fazer cópia; "Verificar" da cópia das 13:08 com 11 ficheiros intactos; navegação com a ligação `notes-link`; "Transferir em .zip" (o proprietário confirmou o nome do ficheiro): 908 bytes com os ficheiros e a ligação em modo `0o120777`, e o `unzip` recriou a ligação |
+| Testado automaticamente | 169 testes na web (9 novos) e a ida e volta cruzada nos dois sentidos |
+
+Não testado: restaurar para uma pasta a partir do browser (precisa do seletor de pastas do sistema; o caminho é o mesmo do `.zip` sem as ligações), Firefox e Safari, cópias v2 com nomes inválidos no Drive real (só no golden). **Por fazer pelo proprietário:** juntar `format-v2-spec` e `web-reads-v2` ao `main` da XkyHold e fazer o deploy antes da release da lx. Fica no `~/Downloads` do proprietário o `XkyHold 2026-11-14.zip` de teste.
 
 ## 8. Questões em aberto
 

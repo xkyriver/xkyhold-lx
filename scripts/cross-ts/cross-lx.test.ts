@@ -7,6 +7,7 @@ import { expect, it } from 'vitest'
 import { MemoryDestination } from '../storage/memory'
 import { backup } from './backup'
 import { fromBase64, fromUtf8, inflate, sha256Hex, toBase64, utf8 } from './bytes'
+import * as cryptoModule from './crypto'
 import { open as openSealed, unlockRepository } from './crypto'
 import { Repository } from './repo'
 import { readFile } from './restore'
@@ -46,17 +47,26 @@ it('reads the bytes of a format 2 repository written by the Rust engine', async 
   for (const [k, v] of Object.entries(fx.objects)) dest.objects.set(k, fromBase64(v as string))
   const config = await Repository.readConfig(dest)
   expect(config.format).toBe(2)
-  // XkyHold 1.0 refuses format 2, as the spec wants (FORMAT-v2.md 3.1).
-  await expect(unlockRepository(config, { password: fx.password })).rejects.toThrow(/format 2/)
-  // Test harness only: open the keys as format 1 to check every byte below.
-  const keys = await unlockRepository({ ...config, format: 1 }, { password: fx.password })
-  const repo = new Repository(dest, keys)
-  await repo.loadIndex()
-  // A version 1 reader fails closed on version 2 snapshots (3.2).
-  await expect(repo.listSnapshots()).rejects.toThrow()
-  const [name] = (await dest.list('snapshots')).map((o) => o.name)
-  const sealed = await dest.get('snapshots', name)
-  const snap = JSON.parse(fromUtf8(await inflate(await openSealed(keys.encKey, sealed, `xkyhold/v2/snapshot/${name}`))))
+  let repo: Repository
+  let snap: any
+  if ((cryptoModule as { READABLE_FORMATS?: readonly number[] }).READABLE_FORMATS?.includes(2)) {
+    // XkyHold with format 2 support (restore-only): the real reader.
+    repo = await Repository.open(dest, { password: fx.password })
+    expect((repo as unknown as { format: number }).format).toBe(2)
+    ;[snap] = await repo.listSnapshots()
+  } else {
+    // XkyHold 1.0 refuses format 2, as the spec wants (FORMAT-v2.md 3.1).
+    await expect(unlockRepository(config, { password: fx.password })).rejects.toThrow(/format 2/)
+    // Test harness only: open the keys as format 1 to check every byte below.
+    const keys = await unlockRepository({ ...config, format: 1 }, { password: fx.password })
+    repo = new Repository(dest, keys)
+    await repo.loadIndex()
+    // A version 1 reader fails closed on version 2 snapshots (3.2).
+    await expect(repo.listSnapshots()).rejects.toThrow()
+    const [name] = (await dest.list('snapshots')).map((o) => o.name)
+    const sealed = await dest.get('snapshots', name)
+    snap = JSON.parse(fromUtf8(await inflate(await openSealed(keys.encKey, sealed, `xkyhold/v2/snapshot/${name}`))))
+  }
   expect(snap.format).toBe(2)
   expect(snap.home.uid).toBeTypeOf('number')
 
