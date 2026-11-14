@@ -368,6 +368,18 @@ Utilizador Linux novo `xkytest`, criado pelo proprietário, sem configuração, 
 
 Encontrado e corrigido (`a1cfd31`): o porta-chaves contava como disponível só por haver bus de sessão; agora só conta se uma procura responder. Sem porta-chaves, a sessão Google fica em memória enquanto a janela está aberta, e o assistente diz que será preciso entrar de novo e que a cópia automática precisa de um porta-chaves. Encontrado e corrigido a seguir: a página inicial de um utilizador novo dizia "Your files are safe" com a cópia de outro utilizador do mesmo computador, porque a cópia "deste computador" era escolhida só pelo nome da máquina; a cópia seguinte desse utilizador também partiria da do outro. Agora conta a mesma máquina **e** a mesma pasta pessoal (teste `the_latest_backup_is_of_this_home`); sem cópia desta pasta pessoal, a página inicial diz que ainda não há cópia. Falta da Fase 7: os pacotes, a página e a release.
 
+### Fase 7: pacotes (14/11/2026)
+
+Pelo empacotador do Tauri, com o cliente Google embutido na compilação (`option_env!`, de `.env.local`). Ficheiros novos em `packaging/`: `xkyhold-lx.desktop` (modelo do atalho, com nome, comentário e palavras-chave em pt-PT) e `com.xkyriver.xkyhold-lx.metainfo.xml` (AppStream, inglês e pt-PT). O nome do produto passou a `xkyhold-lx` para o pacote e o atalho terem esse nome (a janela continua "XkyHold-lx").
+
+| Pacote | Tamanho | Estado |
+|---|---|---|
+| `xkyhold-lx_<versão>_amd64.deb` | 5,3 MB | Conteúdo verificado: binário, atalho, ícones 32–512 px na pasta `hicolor` normal, metainfo. Depende de `libwebkit2gtk-4.1-0` e `libgtk-3-0`; recomenda `libnotify-bin` e `gnome-keyring`. Atalho e metainfo passam no `desktop-file-validate` e no `appstreamcli validate`. **Não instalado** num Debian/Ubuntu |
+| `xkyhold-lx-<versão>-1.x86_64.rpm` | 5,3 MB | O mesmo conteúdo; recomenda `libnotify` e `gnome-keyring`. **Não instalado** num Fedora |
+| `xkyhold-lx_<versão>_amd64.AppImage` | 104 MB (leva o WebKitGTK) | **Visto a funcionar nesta máquina:** a janela abre, o temporizador passa a apontar para o próprio AppImage e uma passagem `--scheduled` pelo systemd termina bem. As ferramentas do AppImage (`linuxdeploy` e plugins, ~36 MB) foram descarregadas do GitHub para `~/.cache/tauri` com o "sim" do proprietário |
+
+Limitações conhecidas: (1) desinstalar o pacote não remove o temporizador de cada utilizador (o pacote não mexe nos serviços dos utilizadores); fica a falhar de hora a hora até "Remover deste computador" — a página deve dizer para fazer isso antes de desinstalar; (2) qualquer argumento que não seja `--scheduled` abre a janela e atualiza o caminho do temporizador (ex.: `xkyhold-lx --help`); proposta: `--help` e `--version` respondem no terminal e saem. A versão ainda é 0.1.0; passa a 1.0.0 na release.
+
 ## 8. Questões em aberto
 
 1. ~~Repositório GitHub~~: **decidido pelo proprietário a 14/11/2026:** privado desde já (com o "sim" dele no momento de o criar), público na release v1.0.0.
