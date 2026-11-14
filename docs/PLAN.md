@@ -320,10 +320,17 @@ Critério da fase:
 
 Não testado: restaurar para uma pasta a partir do browser (precisa do seletor de pastas do sistema; o caminho é o mesmo do `.zip` sem as ligações), Firefox e Safari, cópias v2 com nomes inválidos no Drive real (só no golden). **Por fazer pelo proprietário:** juntar `format-v2-spec` e `web-reads-v2` ao `main` da XkyHold e fazer o deploy antes da release da lx. Fica no `~/Downloads` do proprietário o `XkyHold 2026-11-14.zip` de teste.
 
+### Fase 7: decisões do proprietário (14/11/2026)
+
+- **Prova real nos dois destinos:** um disco externo que o proprietário vai ligar, e o Google Drive de **outra conta Google**, com mais espaço, para caber a home inteira. A home tem cerca de 56 GB sem `.cache`; o disco interno só tem 22 GB livres, por isso o restauro completo para comparação também tem de ir para o disco externo. Hoje a app só restaura para pastas dentro da home: proposta a apresentar nessa altura (restaurar para uma pasta escolhida fora da home, como um disco; a cópia continua limitada à home).
+- **GitHub:** privado já, público na release.
+- **Site:** página no site da XkyHold.
+- **XkyHold web:** os ramos `format-v2-spec` e `web-reads-v2` foram juntados ao `main` local da XkyHold a 14/11/2026 (avanço rápido até `f0e55bc`; 169 testes a passar); o push e o deploy ficam para o proprietário, antes da release da lx.
+
 ## 8. Questões em aberto
 
-1. Repositório GitHub `xkyriver/xkyhold-lx`: público desde o início ou só na release?
-2. Subdomínio ou página própria (ex.: `xkyhold.xkyriver.com/linux`), e entrada no xkyriver.com.
+1. ~~Repositório GitHub~~: **decidido pelo proprietário a 14/11/2026:** privado desde já (com o "sim" dele no momento de o criar), público na release v1.0.0.
+2. ~~Subdomínio ou página própria~~: **decidido pelo proprietário a 14/11/2026:** página no site da XkyHold (`xkyhold.xkyriver.com/linux/` e `/pt/linux/`), com a landing a apontar para ela em vez do Déjà Dup.
 3. ~~Ligações físicas~~: mantida na revisão de 14/11/2026 a proposta do rascunho, guardá-las como ficheiros separados (fecha com a aprovação da especificação).
 4. ~~Repositório v1 → v2~~: **decidido pelo proprietário a 14/11/2026:** a lx só escreve em repositórios criados como v2 e abre os v1 só para navegar, restaurar e verificar. A especificação v2 não tem atualização no lugar (pode vir depois, se houver procura). Na primeira versão com leitura v2, a XkyHold web só restaura de repositórios v2: não copia para eles nem os limpa.
 5. Quota da Drive API: é partilhada com a XkyHold web por ser o mesmo projeto; medir na Fase 3.
