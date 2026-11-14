@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.xkyriver.xkyhold-lx</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>AGPL-3.0-only</project_license>
+  <name>XkyHold-lx</name>
+  <summary>Encrypted backup of your home folder</summary>
+  <summary xml:lang="pt-PT">Cópia de segurança cifrada da tua pasta pessoal</summary>
+  <description>
+    <p>
+      XkyHold-lx backs up your whole home folder, or the parts you choose, to your
+      Google Drive or to a folder such as an external disk. Everything is encrypted
+      on your computer before it leaves it; Google and the disk only see ciphertext.
+    </p>
+    <p xml:lang="pt-PT">
+      A XkyHold-lx faz a cópia de segurança da tua pasta pessoal, inteira ou só das
+      partes que escolheres, para o teu Google Drive ou para uma pasta, por exemplo
+      num disco externo. Tudo é cifrado no teu computador antes de sair dele; a Google
+      e o disco só veem dados cifrados.
+    </p>
+    <ul>
+      <li>Each backup only sends what changed</li>
+      <li xml:lang="pt-PT">Cada cópia só envia o que mudou</li>
+      <li>Restore everything, or single files, to any folder</li>
+      <li xml:lang="pt-PT">Restaura tudo, ou só alguns ficheiros, para qualquer pasta</li>
+      <li>A reminder, or automatic backups with the window closed</li>
+      <li xml:lang="pt-PT">Um lembrete, ou cópias automáticas com a janela fechada</li>
+      <li>Backups made here can also be restored with XkyHold in a web browser</li>
+      <li xml:lang="pt-PT">As cópias feitas aqui também se restauram com a XkyHold no navegador</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">xkyhold-lx.desktop</launchable>
+  <url type="homepage">https://xkyhold.xkyriver.com/linux/</url>
+  <developer id="com.xkyriver">
+    <name>XKYRIVER</name>
+  </developer>
+  <categories>
+    <category>Utility</category>
+    <category>Archiving</category>
+  </categories>
+  <keywords>
+    <keyword>backup</keyword>
+    <keyword>restore</keyword>
+    <keyword>encryption</keyword>
+  </keywords>
+  <content_rating type="oars-1.1"/>
+  <provides>
+    <binary>xkyhold-lx</binary>
+  </provides>
+</component>

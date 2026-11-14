@@ -1,0 +1,15 @@
+[Desktop Entry]
+Type=Application
+Name=XkyHold-lx
+GenericName=Backup
+GenericName[pt_PT]=Cópia de segurança
+Comment=Encrypted backup of your home folder to Google Drive or a disk
+Comment[pt_PT]=Cópia de segurança cifrada da tua pasta pessoal para o Google Drive ou um disco
+Exec={{exec}}
+Icon={{icon}}
+Terminal=false
+Categories=Utility;Archiving;
+Keywords=backup;restore;encryption;Google Drive;
+Keywords[pt_PT]=cópia;segurança;restauro;cifra;Google Drive;
+StartupWMClass={{exec}}
+StartupNotify=true
