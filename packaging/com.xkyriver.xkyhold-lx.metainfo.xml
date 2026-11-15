@@ -45,6 +45,12 @@
   </keywords>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="1.0.2" date="2026-11-15">
+      <description>
+        <p>Tells you about new versions, and updates the AppImage after checking its signature.</p>
+        <p xml:lang="pt-PT">Avisa quando há versões novas e atualiza o AppImage depois de verificar a assinatura.</p>
+      </description>
+    </release>
     <release version="1.0.1" date="2026-11-14">
       <description>
         <p>Rust build folders are left out only next to a Cargo.toml.</p>

@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.0.2 — 2026-11-15
+
+- XkyHold-lx now tells you when a new version is out: a notice on Home with
+  Update, What's new and Not now, and an About card in Settings. It looks at
+  most once a day, reading a public file on GitHub; you can turn this off.
+- On the AppImage (also under AppMan), Update downloads the new version,
+  checks its signature and puts it in place; then Restart now. On the .deb
+  and .rpm it opens the release page.
+- Releases are signed; nothing unsigned, and no older version, is installed.
+- New suggestion: Maven build folders (`target` next to a `pom.xml`).
+- The footer says "by xkyriver on xion".
+
+Versions 1.0.0 and 1.0.1 do not look for updates: install 1.0.2 by hand once.
+
 ## 1.0.1 — 2026-11-14
 
 - "Rust build folders" now leaves out a `target` folder only when a

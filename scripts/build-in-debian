@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Builds the AppImage, .deb and .rpm of the last commit inside a Debian 12
+# container (packaging/build/Dockerfile.debian12), with the Google client of
+# .env.local embedded. The packages land in target/debian12/bundle/, ready
+# for scripts/release (BUNDLE_DIR=target/debian12/bundle).
+#
+# Uncommitted changes are not built: commit first.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+[ -f .env.local ] || { echo "No .env.local with the Google client." >&2; exit 1; }
+set -a; . ./.env.local; set +a
+[ -n "${XKYHOLD_LX_CLIENT_ID:-}" ] && [ -n "${XKYHOLD_LX_CLIENT_SECRET:-}" ] || { echo ".env.local lacks the client." >&2; exit 1; }
+
+RUST=$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)
+NODE=$(sed -n 's/^node = "\(.*\)"$/\1/p' mise.toml)
+IMAGE=xkyhold-lx-build:debian12-rust$RUST-node$NODE
+OUT=target/debian12
+CACHE=target/debian12-cache
+
+docker build -q -t "$IMAGE" --build-arg RUST="$RUST" --build-arg NODE="$NODE" -f packaging/build/Dockerfile.debian12 packaging/build
+rm -rf "$OUT"
+mkdir -p "$OUT/bundle" "$CACHE/registry" "$CACHE/tauri"
+# The source of the last commit, built in the container's own folder; the
+# crate and tool downloads are kept between builds.
+git archive --format=tar HEAD | docker run --rm -i \
+  -e XKYHOLD_LX_CLIENT_ID -e XKYHOLD_LX_CLIENT_SECRET \
+  -v "$PWD/$OUT/bundle:/out" \
+  -v "$PWD/$CACHE/registry:/usr/local/cargo/registry" \
+  -v "$PWD/$CACHE/tauri:/root/.cache/tauri" \
+  "$IMAGE" bash -c '
+    set -euo pipefail
+    tar -x -C /src
+    npm ci --no-audit --no-fund
+    CARGO_TARGET_DIR=/build npx tauri build
+    cp -r /build/release/bundle/appimage /build/release/bundle/deb /build/release/bundle/rpm /out/
+    chown -R '"$(id -u):$(id -g)"' /out /usr/local/cargo/registry /root/.cache/tauri
+  '
+for f in "$OUT"/bundle/appimage/*.AppImage; do "$f" --version; done
+echo "Packages in $OUT/bundle/."
