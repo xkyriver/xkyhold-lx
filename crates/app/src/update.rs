@@ -27,9 +27,9 @@ const MAX_LATEST: u64 = 256 * 1024;
 
 /// The public key every release is signed with (docs/UPDATES.md 4.5), as
 /// `tauri signer generate` writes it: the minisign public key file, in
-/// base64. The private key stays with the owner. Empty until it exists:
-/// then no version is announced and nothing is installed.
-pub const PUBLIC_KEY: &str = "";
+/// base64 (key id E58D45F35118A8A2, created by the owner on 15/11/2026).
+/// The private key stays with the owner, outside the repository.
+pub const PUBLIC_KEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEU1OEQ0NUYzNTExOEE4QTIKUldTaXFCaFI4MFdONVVRWEtma2VybzBVaFVYWTJTZ0N1UURZbzgyamFibHJEL0d3WGdOUWNGZmQK";
 
 /// A test build (docs/UPDATES.md, phase U4): built with
 /// `XKYHOLD_LX_TEST_UPDATE_URL` and `XKYHOLD_LX_TEST_UPDATE_KEY`, it reads
@@ -466,6 +466,13 @@ mod tests {
         std::fs::write(dir.path().join("version"), b"https://old\n").unwrap();
         tell_appman(&app, "https://new").unwrap();
         assert_eq!(std::fs::read_to_string(dir.path().join("version")).unwrap(), "https://new\n");
+    }
+
+    #[test]
+    fn the_release_key_is_a_minisign_public_key() {
+        let text = unwrap_text(PUBLIC_KEY, "public key").unwrap();
+        assert!(text.contains("minisign public key: E58D45F35118A8A2"));
+        PublicKey::decode(&text).unwrap();
     }
 
     #[test]
