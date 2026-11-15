@@ -31,7 +31,8 @@ fn main() -> std::process::ExitCode {
             return ExitCode::SUCCESS;
         }
         Some(a) if a == "--version" || a == "-V" => {
-            println!("xkyhold-lx {}", env!("CARGO_PKG_VERSION"));
+            let test = if xkyhold_app::update::test_build() { " (test build: not for release)" } else { "" };
+            println!("xkyhold-lx {}{test}", env!("CARGO_PKG_VERSION"));
             return ExitCode::SUCCESS;
         }
         Some(a) => {

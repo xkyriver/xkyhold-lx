@@ -5,6 +5,7 @@
 //! The request carries no identifier: it downloads one public file.
 
 use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use minisign_verify::{PublicKey, Signature};
@@ -30,11 +31,25 @@ const MAX_LATEST: u64 = 256 * 1024;
 /// then no version is announced and nothing is installed.
 pub const PUBLIC_KEY: &str = "";
 
+/// A test build (docs/UPDATES.md, phase U4): built with
+/// `XKYHOLD_LX_TEST_UPDATE_URL` and `XKYHOLD_LX_TEST_UPDATE_KEY`, it reads
+/// updates from that address with that key and never touches the systemd
+/// timer. `scripts/release` refuses to publish one.
+const TEST_URL: Option<&str> = option_env!("XKYHOLD_LX_TEST_UPDATE_URL");
+const TEST_KEY: Option<&str> = option_env!("XKYHOLD_LX_TEST_UPDATE_KEY");
+
+pub fn test_build() -> bool {
+    TEST_URL.is_some()
+}
+
 /// The key to check releases with. Development builds may use a test key.
-fn public_key() -> Result<String> {
+pub fn public_key() -> Result<String> {
     #[cfg(debug_assertions)]
     if let Ok(key) = std::env::var("XKYHOLD_LX_UPDATE_KEY") {
         return Ok(key);
+    }
+    if let Some(key) = TEST_KEY {
+        return Ok(key.to_owned());
     }
     if PUBLIC_KEY.is_empty() {
         return Err(Error::Usage("this build has no key to check updates with".into()));
@@ -159,7 +174,7 @@ fn latest_url() -> String {
     if let Ok(url) = std::env::var("XKYHOLD_LX_UPDATE_URL") {
         return url;
     }
-    LATEST_URL.to_owned()
+    TEST_URL.unwrap_or(LATEST_URL).to_owned()
 }
 
 /// Downloads a small public file, following GitHub's redirect.
@@ -181,6 +196,141 @@ pub fn fetch_latest() -> Result<Latest> {
     let signature = String::from_utf8(get(&format!("{url}.sig"), 4096)?)
         .map_err(|_| Error::Format("latest.json.sig: not text".into()))?;
     Latest::verified(&json, &signature, &key)
+}
+
+/// How this program was installed, which decides what "Update" does
+/// (docs/UPDATES.md 4.4).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum Install {
+    /// An AppImage the person downloaded: replaced in place.
+    AppImage {
+        path: PathBuf,
+    },
+    /// An AppImage AppMan manages: replaced in place, then AppMan told.
+    AppMan {
+        path: PathBuf,
+    },
+    /// Installed from a package; the system's tool updates it (phase U5).
+    Deb,
+    Rpm,
+    /// Run from a build folder, or anything else: the release page.
+    Other,
+}
+
+impl Install {
+    /// The `files` entry of `latest.json` this installation needs.
+    pub fn package(&self) -> Option<&'static str> {
+        match self {
+            Install::AppImage { .. } | Install::AppMan { .. } => Some("appimage-x86_64"),
+            Install::Deb => Some("deb-amd64"),
+            Install::Rpm => Some("rpm-x86_64"),
+            Install::Other => None,
+        }
+    }
+}
+
+/// Finds out how this program was installed. An AppImage says where it is
+/// in `APPIMAGE`; AppMan keeps `AM-updater` and `version` next to it.
+pub fn installed() -> Install {
+    if let Some(path) = std::env::var_os("APPIMAGE").map(PathBuf::from).filter(|p| p.is_absolute() && p.is_file()) {
+        let dir = path.parent().unwrap_or(Path::new("/"));
+        return if dir.join("AM-updater").is_file() && dir.join("version").is_file() {
+            Install::AppMan { path }
+        } else {
+            Install::AppImage { path }
+        };
+    }
+    let Ok(exe) = std::env::current_exe() else { return Install::Other };
+    let owned_by = |tool: &str, arg: &str| {
+        std::process::Command::new(tool)
+            .arg(arg)
+            .arg(&exe)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success())
+    };
+    if owned_by("dpkg", "-S") {
+        Install::Deb
+    } else if owned_by("rpm", "-qf") {
+        Install::Rpm
+    } else {
+        Install::Other
+    }
+}
+
+/// Can this program replace itself? Its folder must be writable.
+pub fn can_replace(path: &Path) -> bool {
+    let Some(dir) = path.parent() else { return false };
+    let probe = dir.join(format!(".xkyhold-lx-write-test-{}", std::process::id()));
+    let ok = std::fs::write(&probe, b"").is_ok();
+    let _ = std::fs::remove_file(&probe);
+    ok
+}
+
+/// Downloads a package of up to `size` bytes, reporting progress.
+pub fn download(url: &str, size: u64, on_progress: &mut dyn FnMut(u64, u64)) -> Result<Vec<u8>> {
+    use std::io::Read;
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_connect(Some(Duration::from_secs(30)))
+        .timeout_recv_body(Some(Duration::from_secs(600)))
+        .user_agent(format!("xkyhold-lx/{CURRENT}"))
+        .build()
+        .into();
+    let mut response = agent.get(url).call().map_err(|e| Error::Usage(format!("update download: {e}")))?;
+    let mut reader = response.body_mut().with_config().limit(size + 1).reader();
+    let mut data = Vec::with_capacity(size as usize);
+    let mut buf = vec![0u8; 256 * 1024];
+    loop {
+        let n = reader.read(&mut buf).map_err(|e| Error::Usage(format!("update download: {e}")))?;
+        if n == 0 {
+            break;
+        }
+        data.extend_from_slice(&buf[..n]);
+        on_progress(data.len() as u64, size);
+    }
+    Ok(data)
+}
+
+/// Puts a verified AppImage in place of `path`. The new file is written
+/// next to it, made executable and renamed over it in one step; the old
+/// one stays as `<name>.old` until the new version opens
+/// ([`tidy_after_update`]). The path does not change, so the systemd timer
+/// still points at the right program.
+pub fn replace_appimage(path: &Path, data: &[u8]) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let name = path.file_name().ok_or_else(|| Error::Usage("no file name".into()))?.to_string_lossy();
+    let dir = path.parent().ok_or_else(|| Error::Usage("no folder".into()))?;
+    let new = dir.join(format!(".{name}.new"));
+    let old = dir.join(format!("{name}.old"));
+    std::fs::write(&new, data)?;
+    std::fs::set_permissions(&new, std::fs::Permissions::from_mode(0o755))?;
+    let _ = std::fs::remove_file(&old);
+    std::fs::hard_link(path, &old).or_else(|_| std::fs::copy(path, &old).map(|_| ()))?;
+    if let Err(e) = std::fs::rename(&new, path) {
+        let _ = std::fs::remove_file(&new);
+        return Err(e.into());
+    }
+    Ok(())
+}
+
+/// AppMan's `version` file holds the address of the installed AppImage:
+/// set it to the new one, so the next `appman -u` does not fetch it again.
+pub fn tell_appman(path: &Path, url: &str) -> Result<()> {
+    let version = path.parent().ok_or_else(|| Error::Usage("no folder".into()))?.join("version");
+    std::fs::write(version, format!("{url}\n"))?;
+    Ok(())
+}
+
+/// The new version opened: the old AppImage kept by [`replace_appimage`]
+/// is no longer needed.
+pub fn tidy_after_update() {
+    if let Some(path) = std::env::var_os("APPIMAGE").map(PathBuf::from) {
+        let mut old = path.into_os_string();
+        old.push(".old");
+        let _ = std::fs::remove_file(old);
+    }
 }
 
 /// What to show now: the version found, unless it is not newer than this
@@ -297,6 +447,25 @@ mod tests {
         assert!(verify(&key, &old_sig, &old, "xkyhold-lx_9.9.9_amd64.AppImage").is_err());
         verify(&key, &old_sig, &old, "xkyhold-lx_0.9.0_amd64.AppImage").unwrap();
         assert!(latest.verify_package("deb-amd64", &good, &key).is_err());
+    }
+
+    #[test]
+    fn an_appimage_is_replaced_in_one_step_and_the_old_one_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = dir.path().join("xkyhold-lx");
+        std::fs::write(&app, b"version 1").unwrap();
+        assert!(can_replace(&app));
+        replace_appimage(&app, b"version 2").unwrap();
+        assert_eq!(std::fs::read(&app).unwrap(), b"version 2");
+        assert_eq!(std::fs::read(dir.path().join("xkyhold-lx.old")).unwrap(), b"version 1");
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(std::fs::metadata(&app).unwrap().permissions().mode() & 0o777, 0o755);
+        let left: Vec<_> = std::fs::read_dir(dir.path()).unwrap().map(|e| e.unwrap().file_name()).collect();
+        assert_eq!(left.len(), 2, "no temporary file left: {left:?}");
+
+        std::fs::write(dir.path().join("version"), b"https://old\n").unwrap();
+        tell_appman(&app, "https://new").unwrap();
+        assert_eq!(std::fs::read_to_string(dir.path().join("version")).unwrap(), "https://new\n");
     }
 
     #[test]

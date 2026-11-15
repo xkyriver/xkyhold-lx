@@ -33,6 +33,10 @@ RPM=xkyhold-lx-${VERSION}-1.x86_64.rpm
 for f in "appimage/$APPIMAGE" "deb/$DEB" "rpm/$RPM"; do
   [ -f "$BUNDLE/$f" ] || { echo "Missing $BUNDLE/$f: build version $VERSION first." >&2; exit 1; }
 done
+if "$BUNDLE/appimage/$APPIMAGE" --version | grep -q "test build"; then
+  echo "$APPIMAGE is a test build (XKYHOLD_LX_TEST_UPDATE_* were set): build again without them." >&2
+  exit 1
+fi
 if [ -n "$NOTES_PT" ] && [ ! -f "$NOTES_PT" ]; then
   echo "No notes file $NOTES_PT." >&2
   exit 1

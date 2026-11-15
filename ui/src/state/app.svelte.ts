@@ -41,6 +41,8 @@ export const app = $state({
   lastCheck: null as { ok: boolean; text: string; time: string } | null,
   /** A newer version to offer (docs/UPDATES.md 4.3). */
   update: null as Available | null,
+  /** An update being installed: download progress, then ready to restart. */
+  updating: null as { done: number; total: number; ready: boolean } | null,
 })
 
 export const settings = (): Settings | undefined => app.status?.settings
@@ -86,6 +88,14 @@ export function explain(err: unknown): string {
       return t('XkyHold-lx only works with what is inside your home folder.')
     case 'root':
       return t('XkyHold-lx does not run as administrator (root). Open it as yourself.')
+    case 'update-download':
+      return t('The new version could not be downloaded. Check your internet connection and try again.')
+    case 'update-signature':
+      return t('The download did not pass the signature check, so nothing was changed. Try again later.')
+    case 'update-install':
+      return t('The new version could not be put in place. Your version is unchanged.')
+    case 'update-none':
+      return t('There is no newer version.')
     case 'update-check':
       return t('Could not look for a new version. Check your internet connection and try again.')
     case 'keyring':
@@ -292,10 +302,36 @@ export async function skipUpdate(): Promise<void> {
   await api.updateSkip(version).catch(fail)
 }
 
-/** "Update". For now it opens the release page (docs/UPDATES.md, phase U2). */
+/** Can "Update" install here, or does it open the release page? */
+export const updatesInPlace = (): boolean => ['appimage', 'appman'].includes(app.status?.install ?? '')
+
+/**
+ * "Update": an AppImage is replaced in place after its signature checks
+ * out; elsewhere the release page opens (docs/UPDATES.md 4.4).
+ */
 export async function startUpdate(): Promise<void> {
-  if (!app.update || app.job) return
-  await api.openRelease(app.update.page).catch(fail)
+  if (!app.update || app.job || app.updating) return
+  if (!updatesInPlace()) {
+    await api.openRelease(app.update.page).catch(fail)
+    return
+  }
+  app.updating = { done: 0, total: 0, ready: false }
+  const stop = await on.updateProgress((p) => {
+    if (app.updating) Object.assign(app.updating, p)
+  })
+  try {
+    const installed = await api.updateInstall()
+    app.updating = installed ? { done: 0, total: 0, ready: true } : null
+  } catch (err) {
+    app.updating = null
+    fail(err)
+  } finally {
+    stop()
+  }
+}
+
+export async function restartAfterUpdate(): Promise<void> {
+  await api.updateRestart().catch(fail)
 }
 
 export async function start(): Promise<void> {

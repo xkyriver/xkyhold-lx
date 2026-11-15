@@ -62,6 +62,8 @@ export interface Status {
   timer: boolean
   google_client: boolean
   keyring: boolean
+  /** How "Update" works here (docs/UPDATES.md 4.4). */
+  install: 'appimage' | 'appman' | 'deb' | 'rpm' | 'other'
 }
 
 export interface SnapInfo {
@@ -164,6 +166,8 @@ export const api = {
   updateCheck: (now: boolean) => invoke<Available | null>('update_check', { now }),
   updateSkip: (version: string) => invoke<void>('update_skip', { version }),
   openRelease: (url: string) => invoke<void>('open_release', { url }),
+  updateInstall: () => invoke<boolean>('update_install'),
+  updateRestart: () => invoke<void>('update_restart'),
 }
 
 export const on = {
@@ -173,4 +177,6 @@ export const on = {
     listen<Record<string, number>>('sizes', (e) => f(e.payload)),
   signinUrl: (f: (url: string) => void): Promise<UnlistenFn> => listen<string>('signin-url', (e) => f(e.payload)),
   closeRequested: (f: () => void): Promise<UnlistenFn> => listen('close-requested', () => f()),
+  updateProgress: (f: (p: { done: number; total: number }) => void): Promise<UnlistenFn> =>
+    listen<{ done: number; total: number }>('update-progress', (e) => f(e.payload)),
 }

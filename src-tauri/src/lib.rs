@@ -114,6 +114,25 @@ struct Status {
     timer: bool,
     google_client: bool,
     keyring: bool,
+    /// How "Update" works here: "appimage", "appman", "deb", "rpm" or "other".
+    install: &'static str,
+}
+
+/// How this program was installed, found once.
+fn install() -> &'static xkyhold_app::update::Install {
+    static INSTALL: std::sync::OnceLock<xkyhold_app::update::Install> = std::sync::OnceLock::new();
+    INSTALL.get_or_init(xkyhold_app::update::installed)
+}
+
+fn install_kind() -> &'static str {
+    use xkyhold_app::update::Install;
+    match install() {
+        Install::AppImage { .. } => "appimage",
+        Install::AppMan { .. } => "appman",
+        Install::Deb => "deb",
+        Install::Rpm => "rpm",
+        Install::Other => "other",
+    }
 }
 
 #[tauri::command]
@@ -137,6 +156,7 @@ async fn status(state: State<'_, AppState>) -> Res<Status> {
         timer: xkyhold_app::schedule::timer_enabled(),
         google_client: xkyhold_dest_drive::Client::from_env().is_some(),
         keyring: xkyhold_secrets::SecretService::connect().is_ok(),
+        install: install_kind(),
     })
 }
 
@@ -253,6 +273,10 @@ impl Secret {
 /// systemd still works; only reminders and automatic backups with the
 /// window closed are missing.
 fn sync_timer() {
+    // A test build never touches the timer (docs/UPDATES.md, phase U4).
+    if xkyhold_app::update::test_build() {
+        return;
+    }
     // Development: a window on a test home must not touch the timer of the
     // person's real one (the units have the same name).
     #[cfg(debug_assertions)]
@@ -851,6 +875,98 @@ async fn update_check(now: bool) -> Res<Option<xkyhold_app::update::Available>> 
     .await
 }
 
+#[derive(Clone, Serialize)]
+struct UpdateProgress {
+    done: u64,
+    total: u64,
+}
+
+/// "Update" (docs/UPDATES.md 4.4). An AppImage, also under AppMan, is
+/// replaced in place after its signature checks out; then the window offers
+/// to restart. Elsewhere, for now, the release page opens. Never while a
+/// job runs here or a backup runs in another process. Returns whether the
+/// new version is in place.
+#[tauri::command]
+async fn update_install(app: AppHandle, state: State<'_, AppState>) -> Res<bool> {
+    use xkyhold_app::update::{self, Install};
+    if state.running().is_some() {
+        return Err(ui("busy", "a job is running"));
+    }
+    let how = install().clone();
+    let path = match &how {
+        Install::AppImage { path } | Install::AppMan { path } if update::can_replace(path) => path.clone(),
+        _ => {
+            let page = Settings::load()?
+                .update_latest
+                .map(|a| a.page)
+                .unwrap_or_else(|| format!("{}latest", update::RELEASES));
+            open_release(page).await?;
+            return Ok(false);
+        }
+    };
+    blocking(move || {
+        // A backup by the timer or the CLI, or another window: wait.
+        let _here = xkyhold_app::schedule::LocalLock::take()?;
+        let latest = update::fetch_latest().map_err(|e| ui("update-check", &e.to_string()))?;
+        if !update::is_newer(&latest.version, update::CURRENT) {
+            return Err(ui("update-none", "no newer version"));
+        }
+        let kind = how.package().expect("an AppImage");
+        let file = latest.files.get(kind).ok_or_else(|| ui("update-check", "no AppImage in latest.json"))?;
+        let mut last = 0;
+        let data = update::download(&file.url, file.size, &mut |done, total| {
+            // A few hundred events for a 100 MB file, not one per read.
+            if done - last >= 512 * 1024 || done == total {
+                last = done;
+                let _ = app.emit("update-progress", UpdateProgress { done, total });
+            }
+        })
+        .map_err(|e| ui("update-download", &e.to_string()))?;
+        latest
+            .verify_package(kind, &data, &update::public_key()?)
+            .map_err(|e| ui("update-signature", &e.to_string()))?;
+        update::replace_appimage(&path, &data).map_err(|e| ui("update-install", &e.to_string()))?;
+        if matches!(how, Install::AppMan { .. }) {
+            update::tell_appman(&path, &file.url).map_err(|e| ui("update-install", &e.to_string()))?;
+        }
+        xkyhold_app::log(&format!("updated to {} in place: {}", latest.version, path.display()));
+        Ok(true)
+    })
+    .await
+}
+
+/// After an update: starts the new version and closes this one. The new
+/// process must not inherit anything that points into this AppImage's
+/// mount, which goes away when this one closes.
+#[tauri::command]
+fn update_restart(app: AppHandle) -> Res<()> {
+    use xkyhold_app::update::Install;
+    let (Install::AppImage { path } | Install::AppMan { path }) = install() else {
+        return Err(ui("usage", "not an AppImage"));
+    };
+    let mount = std::env::var("APPDIR").unwrap_or_default();
+    let mut cmd = std::process::Command::new(path);
+    cmd.env_clear();
+    for (key, value) in std::env::vars() {
+        if ["APPDIR", "APPIMAGE", "ARGV0", "OWD"].contains(&key.as_str()) {
+            continue;
+        }
+        if mount.is_empty() || !value.contains(&mount) {
+            cmd.env(&key, &value);
+        } else if value.contains(':') {
+            // A list such as PATH: keep the parts outside the mount.
+            let kept: Vec<&str> = value.split(':').filter(|p| !p.starts_with(&mount)).collect();
+            if !kept.is_empty() {
+                cmd.env(&key, kept.join(":"));
+            }
+        }
+    }
+    cmd.spawn().map_err(Error::from)?;
+    app.state::<AppState>().cancel.store(true, Ordering::Relaxed);
+    app.exit(0);
+    Ok(())
+}
+
 /// "Not now" on a new version.
 #[tauri::command]
 async fn update_skip(version: String) -> Res<()> {
@@ -917,6 +1033,8 @@ pub fn run() {
             update_check,
             update_skip,
             open_release,
+            update_install,
+            update_restart,
         ]);
     #[cfg(debug_assertions)]
     let builder = builder.setup(|app| {
@@ -926,5 +1044,7 @@ pub fn run() {
     // Keep the timer pointing at this program (it may have moved or been
     // updated since the timer was written).
     std::thread::spawn(sync_timer);
+    // This version opened: the AppImage it replaced is no longer needed.
+    xkyhold_app::update::tidy_after_update();
     builder.run(tauri::generate_context!()).expect("error while running XkyHold-lx");
 }
