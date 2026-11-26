@@ -77,6 +77,9 @@ struct AppState {
     scan_cancel: Mutex<Arc<AtomicBool>>,
     /// Stops waiting for the browser during a Google sign-in.
     signin_cancel: Mutex<Arc<AtomicBool>>,
+    /// Turn the computer off when the current backup ends well (asked for
+    /// this backup only).
+    shutdown_after: AtomicBool,
 }
 
 impl AppState {
@@ -116,7 +119,11 @@ struct Status {
     keyring: bool,
     /// How "Update" works here: "appimage", "appman", "deb", "rpm" or "other".
     install: &'static str,
+    /// This session may turn the computer off.
+    can_power_off: bool,
 }
+
+static CAN_POWER_OFF: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
 
 /// How this program was installed, found once.
 fn install() -> &'static xkyhold_app::update::Install {
@@ -157,6 +164,7 @@ async fn status(state: State<'_, AppState>) -> Res<Status> {
         google_client: xkyhold_dest_drive::Client::from_env().is_some(),
         keyring: xkyhold_secrets::SecretService::connect().is_ok(),
         install: install_kind(),
+        can_power_off: *CAN_POWER_OFF.get_or_init(xkyhold_app::power::can_power_off),
     })
 }
 
@@ -423,15 +431,27 @@ fn start_job(
     let app = app.clone();
     std::thread::spawn(move || {
         let state = app.state::<AppState>();
+        // No suspending while the job runs; let go as soon as it ends.
+        let why = match kind {
+            "backup" => "Backing up",
+            "restore" => "Restoring",
+            _ => "Checking a backup",
+        };
+        let awake = xkyhold_app::power::keep_awake(why);
         let result = {
             let mut guard = state.session.lock().unwrap();
             let session = guard.as_mut().expect("checked above");
             let mut throttle = Throttle::new(&app);
             work(session, &state.cancel, &mut throttle)
         };
+        drop(awake);
         *state.job.lock().unwrap() = None;
+        // Only a backup that went well turns the computer off; the choice is
+        // for this backup only.
+        let shutdown =
+            xkyhold_app::power::off_after(state.shutdown_after.swap(false, Ordering::Relaxed), kind, result.is_ok());
         let done = match result {
-            Ok(summary) => json!({ "kind": kind, "ok": true, "summary": summary }),
+            Ok(summary) => json!({ "kind": kind, "ok": true, "summary": summary, "shutdown": shutdown }),
             Err(e) => json!({ "kind": kind, "ok": false, "error": e }),
         };
         let _ = app.emit("job-done", done);
@@ -476,6 +496,23 @@ async fn backup_now(app: AppHandle, state: State<'_, AppState>) -> Res<()> {
             "forgotten": done.forgotten, "cleanup_failed": done.cleanup_error.is_some(),
         }))
     })
+}
+
+/// "Turn off the computer when the backup finishes", for the backup that is
+/// running or about to start.
+#[tauri::command]
+fn set_shutdown_after(state: State<'_, AppState>, on: bool) {
+    state.shutdown_after.store(on, Ordering::Relaxed);
+}
+
+/// Turns the computer off (after the window's countdown).
+#[tauri::command]
+async fn power_off(state: State<'_, AppState>) -> Res<()> {
+    if state.running().is_some() {
+        return Err(ui("busy", "a job is running"));
+    }
+    xkyhold_app::log("turning the computer off, as asked, after the backup");
+    blocking(|| xkyhold_app::power::power_off().map_err(|e| ui("power-off", &e.to_string()))).await
 }
 
 /// The browser may never come back (closed, or the wrong one opened).
@@ -1035,6 +1072,8 @@ pub fn run() {
             open_release,
             update_install,
             update_restart,
+            set_shutdown_after,
+            power_off,
         ]);
     #[cfg(debug_assertions)]
     let builder = builder.setup(|app| {

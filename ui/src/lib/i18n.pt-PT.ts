@@ -272,4 +272,9 @@ export const ptPT: Record<string, string> = {
   'The download did not pass the signature check, so nothing was changed. Try again later.': 'O ficheiro descarregado não passou na verificação da assinatura, por isso nada foi alterado. Tenta mais tarde.',
   'The new version could not be put in place. Your version is unchanged.': 'Não foi possível pôr a versão nova no lugar. A tua versão ficou igual.',
   'There is no newer version.': 'Não há uma versão mais recente.',
+  'Turn off the computer when the backup finishes': 'Desligar o computador quando a cópia terminar',
+  'Only if the backup goes well, after a minute to cancel. Do not close the lid of a laptop: closing it still puts the computer to sleep.': 'Só se a cópia correr bem, depois de um minuto para cancelar. Não feches a tampa de um portátil: fechá-la continua a pôr o computador a dormir.',
+  'Backup complete. The computer turns off in {n} seconds.': 'Cópia concluída. O computador desliga-se dentro de {n} segundos.',
+  'Turn off now': 'Desligar já',
+  'The computer could not be turned off. Your backup is complete; turn the computer off yourself.': 'Não foi possível desligar o computador. A tua cópia está concluída; desliga o computador tu mesmo.',
 }

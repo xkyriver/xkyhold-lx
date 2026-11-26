@@ -43,6 +43,10 @@ export const app = $state({
   update: null as Available | null,
   /** An update being installed: download progress, then ready to restart. */
   updating: null as { done: number; total: number; ready: boolean } | null,
+  /** Turn the computer off when this backup ends well. */
+  shutdownAfter: false,
+  /** Seconds left before the computer turns off; null when none is coming. */
+  poweringOff: null as number | null,
 })
 
 export const settings = (): Settings | undefined => app.status?.settings
@@ -96,6 +100,8 @@ export function explain(err: unknown): string {
       return t('The new version could not be put in place. Your version is unchanged.')
     case 'update-none':
       return t('There is no newer version.')
+    case 'power-off':
+      return t('The computer could not be turned off. Your backup is complete; turn the computer off yourself.')
     case 'update-check':
       return t('Could not look for a new version. Check your internet connection and try again.')
     case 'keyring':
@@ -197,7 +203,42 @@ function startJob(kind: Job['kind']): void {
   app.noticeFolder = null
 }
 
+/** "Turn off the computer when the backup finishes": for this backup only. */
+export async function setShutdownAfter(on: boolean): Promise<void> {
+  app.shutdownAfter = on
+  await api.setShutdownAfter(on).catch(fail)
+}
+
+const POWER_OFF_SECONDS = 60
+let countdown: ReturnType<typeof setInterval> | null = null
+
+/** After a backup that went well: a minute to cancel, then off. */
+function startPowerOff(): void {
+  app.poweringOff = POWER_OFF_SECONDS
+  countdown = setInterval(() => {
+    if (app.poweringOff === null) return
+    app.poweringOff -= 1
+    if (app.poweringOff <= 0) void powerOffNow()
+  }, 1000)
+}
+
+export function cancelPowerOff(): void {
+  if (countdown) clearInterval(countdown)
+  countdown = null
+  app.poweringOff = null
+}
+
+export async function powerOffNow(): Promise<void> {
+  cancelPowerOff()
+  try {
+    await api.powerOff()
+  } catch (err) {
+    fail(err)
+  }
+}
+
 export async function backupNow(): Promise<void> {
+  if (app.shutdownAfter) await api.setShutdownAfter(true).catch(fail)
   startJob('backup')
   try {
     await api.backupNow()
@@ -242,6 +283,10 @@ const num = (v: unknown): number => (typeof v === 'number' ? v : 0)
 function finished(done: JobDone): void {
   app.job = null
   app.generation++
+  // The choice was for this backup only.
+  const shutdown = app.shutdownAfter && done.ok && !!done.shutdown
+  if (done.kind === 'backup') app.shutdownAfter = false
+  if (shutdown) startPowerOff()
   if (app.closing) void api.closeNow()
   if (!done.ok) {
     fail(done.error)

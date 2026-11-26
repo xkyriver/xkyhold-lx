@@ -2,6 +2,7 @@
 //! the settings file, opening a backup (Google Drive or a local folder)
 //! with the keyring or a password, and running a backup end to end.
 
+pub mod power;
 pub mod scan;
 pub mod schedule;
 pub mod settings;

@@ -3,7 +3,7 @@
   import { t } from './lib/i18n.svelte'
   import { reminder } from './lib/reminder'
   import { api } from './lib/api'
-  import { app, backupNow, signIn, start, stopJob } from './state/app.svelte'
+  import { app, backupNow, cancelPowerOff, powerOffNow, signIn, start, stopJob } from './state/app.svelte'
   import type { View } from './state/app.svelte'
   import Home from './ui/Home.svelte'
   import Restore from './ui/Restore.svelte'
@@ -101,6 +101,13 @@
             <button class="btn" onclick={() => api.openFolder(app.noticeFolder!)}>{t('Open folder')}</button>
           {/if}
           <button class="link" onclick={() => (app.notice = null)}>{t('Dismiss')}</button>
+        </div>
+      {/if}
+      {#if app.poweringOff !== null}
+        <div class="banner warn" role="alert">
+          <span>{t('Backup complete. The computer turns off in {n} seconds.', { n: app.poweringOff })}</span>
+          <button class="btn danger" onclick={powerOffNow}>{t('Turn off now')}</button>
+          <button class="btn" onclick={cancelPowerOff}>{t('Cancel')}</button>
         </div>
       {/if}
       {#if app.update && app.view === 'home'}

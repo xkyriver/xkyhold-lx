@@ -64,6 +64,8 @@ export interface Status {
   keyring: boolean
   /** How "Update" works here (docs/UPDATES.md 4.4). */
   install: 'appimage' | 'appman' | 'deb' | 'rpm' | 'other'
+  /** This session may turn the computer off. */
+  can_power_off: boolean
 }
 
 export interface SnapInfo {
@@ -114,6 +116,8 @@ export interface JobDone {
   ok: boolean
   error?: UiError
   summary?: Record<string, number | string | boolean | null>
+  /** A backup that went well, after which the person asked to turn the computer off. */
+  shutdown?: boolean
 }
 
 export type FolderState = 'missing' | 'empty' | 'repository' | 'other' | 'contains-home'
@@ -168,6 +172,8 @@ export const api = {
   openRelease: (url: string) => invoke<void>('open_release', { url }),
   updateInstall: () => invoke<boolean>('update_install'),
   updateRestart: () => invoke<void>('update_restart'),
+  setShutdownAfter: (on: boolean) => invoke<void>('set_shutdown_after', { on }),
+  powerOff: () => invoke<void>('power_off'),
 }
 
 export const on = {

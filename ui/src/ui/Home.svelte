@@ -3,6 +3,7 @@
   import { fileCount, formatWhen, t } from '../lib/i18n.svelte'
   import { reminder } from '../lib/reminder'
   import { app, backupNow, openBackup, stopJob } from '../state/app.svelte'
+  import ShutdownOption from './ShutdownOption.svelte'
   import Unlock from './Unlock.svelte'
 
   const status = $derived(app.status!)
@@ -50,6 +51,7 @@
       {/if}
       <p class="small muted current">{app.job.current || ' '}</p>
       <div><button class="btn" onclick={stopJob}>{t('Stop')}</button></div>
+      {#if app.job.kind === 'backup'}<ShutdownOption />{/if}
       <p class="small muted">{t('Keep this window open until the backup finishes. If it stops, the next backup continues where it left off.')}</p>
     {:else}
       {#if app.opening}
@@ -81,6 +83,7 @@
             {t('Back up now')}
           </button>
         </div>
+        <ShutdownOption />
         {#if status.settings.automatic !== 'off'}
           <p class="small muted">{t('Automatic backups are on: {when}.', { when: t(EVERY[status.settings.automatic]) })}</p>
         {/if}
