@@ -45,6 +45,12 @@
   </keywords>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="1.0.3" date="2026-11-26">
+      <description>
+        <p>Can turn the computer off after a backup, and keeps it awake while a backup runs.</p>
+        <p xml:lang="pt-PT">Pode desligar o computador depois de uma cópia, e não o deixa adormecer enquanto uma cópia corre.</p>
+      </description>
+    </release>
     <release version="1.0.2" date="2026-11-15">
       <description>
         <p>Tells you about new versions, and updates the AppImage after checking its signature.</p>

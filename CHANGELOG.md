@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.3 — 2026-11-26
+
+- New option: turn off the computer when the backup finishes. It applies to
+  that backup only, works only if the backup goes well, and leaves a minute
+  to cancel.
+- The computer no longer goes to sleep during a backup, restore or check.
+  Closing a laptop's lid still puts it to sleep.
+
 ## 1.0.2 — 2026-11-15
 
 - XkyHold-lx now tells you when a new version is out: a notice on Home with

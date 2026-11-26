@@ -5553,7 +5553,7 @@ dependencies = [
 
 [[package]]
 name = "xkyhold-app"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "minisign-verify",
  "serde",
@@ -5571,7 +5571,7 @@ dependencies = [
 
 [[package]]
 name = "xkyhold-core"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "aes-gcm",
  "argon2",
@@ -5594,7 +5594,7 @@ dependencies = [
 
 [[package]]
 name = "xkyhold-dest-drive"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "base64 0.23.1",
  "getrandom 0.4.3",
@@ -5609,7 +5609,7 @@ dependencies = [
 
 [[package]]
 name = "xkyhold-dest-local"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "tempfile",
  "xkyhold-core",
@@ -5617,7 +5617,7 @@ dependencies = [
 
 [[package]]
 name = "xkyhold-lx"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "serde",
  "serde_json",
@@ -5633,7 +5633,7 @@ dependencies = [
 
 [[package]]
 name = "xkyhold-lx-cli"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "clap",
  "rpassword",
@@ -5646,7 +5646,7 @@ dependencies = [
 
 [[package]]
 name = "xkyhold-secrets"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "keyring-core",
  "zbus-secret-service-keyring-store",

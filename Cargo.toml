@@ -4,7 +4,7 @@ members = ["crates/core", "crates/dest-local", "crates/dest-drive", "crates/secr
 default-members = ["crates/core", "crates/dest-local", "crates/dest-drive", "crates/secrets", "crates/app", "crates/cli"]
 
 [workspace.package]
-version = "1.0.2"
+version = "1.0.3"
 edition = "2024"
 license = "AGPL-3.0-only"
 rust-version = "1.100"
